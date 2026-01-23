@@ -61,7 +61,14 @@ else:
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
-CORS(app) 
+CORS(
+    app,
+    resources={r"/*": {"origins": "*"}},
+    supports_credentials=True,
+    methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"]
+)
+ 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -200,156 +207,12 @@ def ask_geogpt():
 
         # General error fallback
         return jsonify({"answer": "### ⚠️ Cognitive Lapse\nI encountered an error processing that request. Please try again in a moment."}), 500
-# import math
-# NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
-# def get_snapshot_identity(lat, lon, timeout=10):
-#     # Basic Position Logic
-#     hemisphere_ns = "Northern" if lat >= 0 else "Southern"
-#     hemisphere_ew = "Eastern" if lon >= 0 else "Western"
-    
-#     # Simple Continent Mapping (Approximate bounding boxes for speed)
-#     continent = "Unknown"
-#     if -35 <= lat <= 38 and -18 <= lon <= 52: continent = "Africa"
-#     elif 36 <= lat <= 71 and -25 <= lon <= 45: continent = "Europe"
-#     elif 10 <= lat <= 80 and 45 <= lon <= 180: continent = "Asia"
-#     elif 15 <= lat <= 72 and -170 <= lon <= -50: continent = "North America"
-#     elif -56 <= lat <= 13 and -82 <= lon <= -35: continent = "South America"
-#     elif -48 <= lat <= -10 and 110 <= lon <= 155: continent = "Australia/Oceania"
-#     elif lat < -60: continent = "Antarctica"
-
-#     try:
-#         res = requests.get(NOMINATIM_URL, params={
-#             "lat": lat, "lon": lon, "format": "json", "zoom": 10, "addressdetails": 1
-#         }, headers={"User-Agent": "GeoAI-Snapshot"}, timeout=timeout)
-        
-#         data = res.json()
-#         addr = data.get("address", {})
-        
-#         return {
-#             "identity": {
-#                 "name": addr.get("city") or addr.get("town") or "Inland Territory",
-#                 "hierarchy": f"{addr.get('state', 'N/A')}, {addr.get('country', 'N/A')}",
-#                 "continent": continent
-#             },
-#             "coordinates": {
-#                 "lat": f"{abs(lat)}° {'N' if lat>=0 else 'S'}",
-#                 "lng": f"{abs(lon)}° {'E' if lon>=0 else 'W'}",
-#                 "zone": f"UTM {int((lon + 180) / 6) + 1}" # Universal Transverse Mercator Zone
-#             },
-#             "physics": {
-#                 "hemisphere": f"{hemisphere_ns} / {hemisphere_ew}",
-#                 "landform": "Coastal" if addr.get("coast") else "Inland Plateau",
-#             },
-#             "summary": f"This site is situated in the {hemisphere_ns} Hemisphere within the continent of {continent}."
-#         }
-#     except:
-#         return {"error": "Service Timed Out"}
-    
-# @app.route("/snapshot_identity", methods=["POST", "OPTIONS"])
-# def snapshot_identity_route():
-#     if request.method == "OPTIONS":
-#         return jsonify({}), 200
-
-#     try:
-#         data = request.json or {}
-#         lat = float(data.get("latitude"))
-#         lon = float(data.get("longitude"))
-
-#         # Call the utility function you already have
-#         snapshot = get_snapshot_identity(lat, lon)
-#         return jsonify(snapshot)
-
-#     except Exception as e:
-#         logger.error(f"Snapshot Route Error: {e}")
-#         return jsonify({
-#             "error": "Internal Server Error",
-#             "professional_summary": "Snapshot service unavailable"
-#         }), 500
 
 import requests
 import math
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 
-# def get_snapshot_identity(lat, lon, timeout=10):
-#     # Basic Position Logic
-#     hemisphere_ns = "Northern" if lat >= 0 else "Southern"
-#     hemisphere_ew = "Eastern" if lon >= 0 else "Western"
-    
-#     # Improved Continent Mapping based on wider bounding boxes
-#     continent = "Global"
-#     if -35 <= lat <= 38 and -20 <= lon <= 55: continent = "Africa"
-#     elif 34 <= lat <= 82 and -25 <= lon <= 45: continent = "Europe"
-#     elif -10 <= lat <= 82 and 25 <= lon <= 180: continent = "Asia"
-#     elif 7 <= lat <= 85 and -170 <= lon <= -50: continent = "North America"
-#     elif -57 <= lat <= 15 and -95 <= lon <= -30: continent = "South America"
-#     elif -50 <= lat <= -10 and 100 <= lon <= 180: continent = "Australia/Oceania"
-#     elif lat < -60: continent = "Antarctica"
-
-#     try:
-#         # Request with addressdetails=1 to get the full hierarchy
-#         res = requests.get(NOMINATIM_URL, params={
-#             "lat": lat, 
-#             "lon": lon, 
-#             "format": "jsonv2", 
-#             "zoom": 10, 
-#             "addressdetails": 1
-#         }, headers={"User-Agent": "GeoAI-Snapshot-App"}, timeout=timeout)
-        
-#         if res.status_code != 200:
-#             raise Exception("Geocoding service busy")
-
-#         data = res.json()
-#         addr = data.get("address", {})
-        
-#         # --- SAFE KEY RETRIEVAL LOGIC ---
-#         # Checks multiple OSM keys to prevent "N/A"
-#         country = addr.get("country", "International Waters")
-#         state = addr.get("state") or addr.get("province") or addr.get("state_district") or "N/A"
-#         district = addr.get("district") or addr.get("county") or addr.get("city_district") or "N/A"
-#         city = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("suburb") or "Inland Territory"
-        
-#         # Dynamic Terrain/Context logic
-#         context = "Urban Infrastructure" if addr.get("city") or addr.get("town") else "Remote / Rural Landscape"
-
-#         summary = (
-#             f"This site is located in {city}, {state}, {country}. "
-#             f"It sits in the {hemisphere_ns} Hemisphere and falls within the {continent} landmass."
-#         )
-        
-#         return {
-#             "identity": {
-#                 "name": city,
-#                 "hierarchy": f"{state}, {country}",
-#                 "continent": continent
-#             },
-#             "coordinates": {
-#                 "lat": f"{abs(lat):.4f}° {'N' if lat>=0 else 'S'}",
-#                 "lng": f"{abs(lon):.4f}° {'E' if lon>=0 else 'W'}",
-#                 "zone": f"UTM {int((lon + 180) / 6) + 1}"
-#             },
-#             "political_identity": {
-#                 "country": country,
-#                 "iso_code": addr.get("country_code", "XX").upper()
-#             },
-#             "administrative_nesting": {
-#                 "state": state,
-#                 "district": district
-#             },
-#             "global_position": {
-#                 "continent": continent,
-#                 "hemisphere": f"{hemisphere_ns} / {hemisphere_ew}"
-#             },
-#             "terrain_context": context,
-#             "professional_summary": summary
-#         }
-#     except Exception as e:
-#         print(f"Geospatial Error: {e}")
-#         return {
-#             "professional_summary": "Geospatial identity resolution failed. Coordinate may be in an unmapped region or service is offline.",
-#             "identity": {"name": "Unknown", "continent": "Global"},
-#             "political_identity": {"country": "Unknown"}
-#         }
 import requests
 import math
 
@@ -433,10 +296,9 @@ def get_snapshot_identity(lat, lon, timeout=10):
         }
     except Exception:
         return {"error": "Resolution Failed"}
-@app.route("/snapshot_identity", methods=["POST", "OPTIONS"])
+@app.route("/snapshot_identity", methods=["POST"])
 def snapshot_identity_route():
-    if request.method == "OPTIONS":
-        return jsonify({}), 200
+  
 
     try:
         data = request.json or {}
@@ -536,10 +398,10 @@ def get_history():
         return jsonify({"error": str(e)}), 500
     
 # --- 2. Suitability Analysis Route ---
-@app.route('/suitability', methods=['POST', 'OPTIONS'])
+@app.route('/suitability', methods=['POST'])
 def suitability():
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
+    # if request.method == 'OPTIONS':
+    #     return jsonify({}), 200
     try:
         data = request.json or {}
         latitude = float(data.get("latitude", 17.3850))
@@ -919,10 +781,10 @@ def generate_report():
         logger.exception("Internal PDF Generation Error")
         return jsonify({"error": "Failed to generate tactical report. See server logs."}), 500
     
-@app.route("/nearby_places", methods=["POST", "OPTIONS"])
+@app.route("/nearby_places", methods=["POST"])
 def nearby_places_route():
-    if request.method == "OPTIONS":
-        return jsonify({}), 200
+    # if request.method == "OPTIONS":
+    #     return jsonify({}), 200
 
     try:
         data = request.json or {}
