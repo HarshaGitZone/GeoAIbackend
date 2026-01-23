@@ -15,7 +15,7 @@ from .pollution_adapter import estimate_pollution_score
 from .landuse_adapter import infer_landuse_score
 from .soil_adapter import estimate_soil_quality_score
 from .rainfall_adapter import estimate_rainfall_score
-from ..ml.train import load_or_create_sample_dataset
+from ml.train import load_or_create_sample_dataset
 from .terrain_adapter import estimate_terrain_slope
 __all__ = [
 	"get_workspace_root",

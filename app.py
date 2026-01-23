@@ -14,27 +14,23 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 # --- CRITICAL: Path Injection to ensure geogpt_config is found ---
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.append(current_dir)
+
 from google import genai 
 from geogpt_config import generate_system_prompt 
-from backend.reports.pdf_generator import generate_land_report
-from backend.integrations.nearby_places import get_nearby_named_places
-from backend.integrations.terrain_adapter import estimate_terrain_slope
+from reports.pdf_generator import generate_land_report
+from integrations.nearby_places import get_nearby_named_places
+from integrations.terrain_adapter import estimate_terrain_slope
 from flask import send_file
 from dotenv import load_dotenv
 load_dotenv()
 # Import your AI library (OpenAI/Gemini/etc.)
 # --- Configuration & Path Logic ---
-BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_DIR = os.path.dirname(BACKEND_DIR)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "ml", "models")
 
-if BACKEND_DIR not in sys.path:
-    sys.path.append(BACKEND_DIR)
 
-from backend.integrations import (
+
+from integrations import (
     compute_suitability_score,
     estimate_flood_risk_score,
     compute_proximity_score,
@@ -64,7 +60,7 @@ else:
 
 
 # --- Flask App Initialization ---
-app = Flask(__name__, static_folder=os.path.join(BASE_DIR, "frontend", "build"), static_url_path="")
+app = Flask(__name__)
 CORS(app) 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -948,13 +944,12 @@ def nearby_places_route():
         }), 200
 
 
-@app.route("/", defaults={"path": ""})
-@app.route("/<path:path>")
-def serve_react(path):
-    build_dir = app.static_folder
-    if path != "" and os.path.exists(os.path.join(build_dir, path)):
-        return send_from_directory(build_dir, path)
-    return send_from_directory(build_dir, "index.html")
+
+# def serve_react(path):
+#     build_dir = app.static_folder
+#     if path != "" and os.path.exists(os.path.join(build_dir, path)):
+#         return send_from_directory(build_dir, path)
+#     return send_from_directory(build_dir, "index.html")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
