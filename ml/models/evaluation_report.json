@@ -1,0 +1,49 @@
+{
+  "n_samples": 3,
+  "models": {
+    "suitability_regressor.pkl": {
+      "mse": 1459.8490177944607,
+      "mae": 31.328878700967437,
+      "r2": -1.551192458281582
+    },
+    "water_detector.pkl": {
+      "confusion_matrix": [
+        [
+          2,
+          0
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "classification_report": {
+        "0": {
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "f1-score": 0.8,
+          "support": 2.0
+        },
+        "1": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1-score": 0.0,
+          "support": 1.0
+        },
+        "accuracy": 0.6666666666666666,
+        "macro avg": {
+          "precision": 0.3333333333333333,
+          "recall": 0.5,
+          "f1-score": 0.4,
+          "support": 3.0
+        },
+        "weighted avg": {
+          "precision": 0.4444444444444444,
+          "recall": 0.6666666666666666,
+          "f1-score": 0.5333333333333333,
+          "support": 3.0
+        }
+      }
+    }
+  }
+}

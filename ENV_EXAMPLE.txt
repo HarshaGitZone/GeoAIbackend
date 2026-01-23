@@ -1,0 +1,1 @@
+GEOAI_MONGO_URI=mongodb+srv://USER:PASS@YOUR_CLUSTER_HOST/?retryWrites=true&w=majority
