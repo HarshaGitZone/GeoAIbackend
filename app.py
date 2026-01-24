@@ -10,6 +10,15 @@ from flask_cors import CORS
 from flask import Flask, request, jsonify
 import logging
 
+# log = logging.getLogger('werkzeug')
+# log.setLevel(logging.ERROR)
+# Load environment variables
+load_dotenv()
+
+# --- Initialize Logging (FIXES YOUR ERROR) ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+# Silence the noisy werkzeug logs
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
@@ -60,16 +69,6 @@ else:
 
 
 # --- Flask App Initialization ---
-# app = Flask(__name__)
-# CORS(
-#     app,
-#     resources={r"/*": {"origins": "*"}},
-#     supports_credentials=True,
-#     methods=["GET", "POST", "OPTIONS"],
-#     allow_headers=["Content-Type", "Authorization"]
-# )
-# --- Flask App Initialization ---
-# --- Flask App Initialization ---
 app = Flask(__name__)
 
 # 1. Standardize Allowed Origins (Ensure NO trailing slashes)
@@ -79,33 +78,29 @@ ALLOWED_ORIGINS = [
     "https://geonexus-ai.vercel.app"
 ]
 
-# 2. Configure CORS correctly
-# We remove supports_credentials to make it easier for local/prod testing
+# 2. Configure CORS correctly - This handles the 'OPTIONS' preflight for you!
 CORS(app, resources={r"/*": {
     "origins": ALLOWED_ORIGINS,
     "methods": ["GET", "POST", "OPTIONS"],
-    "allow_headers": ["Content-Type", "Authorization", "Accept"]
-}})
+    "allow_headers": ["Content-Type", "Authorization", "Accept"],
+    "expose_headers": ["Content-Type", "Authorization"]
+}}, supports_credentials=True)
 
-# 3. Use a SAFER header injector that doesn't duplicate
+# 3. SAFER header injector (Handles error cases and 502s)
 @app.after_request
-def handle_options_and_headers(response):
+def add_cors_headers(response):
     origin = request.headers.get('Origin')
     if origin in ALLOWED_ORIGINS:
-        # Flask-CORS handles the 'Access-Control-Allow-Origin' header, 
-        # so we only add extra security if missing
+        # Avoid duplicate header error if flask-cors already added it
         if 'Access-Control-Allow-Origin' not in response.headers:
             response.headers.add('Access-Control-Allow-Origin', origin)
-            
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        
+    # Standard security headers for split-stack linkage
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    # Use 'add' to append if not present, preventing the 'not allowed' error
+    if 'Access-Control-Allow-Headers' not in response.headers:
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept')
     return response
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-
-# --- ANALYSIS CACHE (In-Memory) ---
-# Caches analysis results by coordinate to ensure identical results for same location
 ANALYSIS_CACHE = {}
 
 def get_cache_key(lat, lng):
@@ -180,11 +175,11 @@ def health():
     return jsonify({"status": "healthy"}), 200
 
 
-@app.route('/ask_geogpt', methods=['POST','OPTIONS'])
+@app.route('/ask_geogpt', methods=['POST'])
 def ask_geogpt():
-    if request.method == 'OPTIONS':
-        # This handles the preflight handshake perfectly
-        return jsonify({"status": "ok"}), 200
+    # if request.method == 'OPTIONS':
+    #     # This handles the preflight handshake perfectly
+    #     return jsonify({"status": "ok"}), 200
     data = request.json or {}
     user_query = data.get('query')
     chat_history = data.get('history', [])
@@ -395,10 +390,10 @@ def calculate_historical_suitability(current_lat, current_lng, range_type):
     
     # For now, we simulate the drift on the scores directly for the UI
     return multiplier * 100
-@app.route('/history_analysis', methods=['POST','OPTIONS'])
+@app.route('/history_analysis', methods=['POST'])
 def get_history():
-    if request.method == "OPTIONS":
-        return jsonify({"status": "ok"}), 200
+    # if request.method == "OPTIONS":
+    #     return jsonify({"status": "ok"}), 200
     data = request.json
     lat = data.get('latitude')
     lng = data.get('longitude')
@@ -437,10 +432,8 @@ def get_history():
         return jsonify({"error": str(e)}), 500
     
 # --- 2. Suitability Analysis Route ---
-@app.route('/suitability', methods=['POST','OPTIONS'])
+@app.route('/suitability', methods=['POST'])
 def suitability():
-    if request.method == 'OPTIONS':
-        return jsonify({"status": "ok"}), 200
     try:
         data = request.json or {}
         latitude = float(data.get("latitude", 17.3850))
