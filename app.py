@@ -72,21 +72,22 @@ else:
 # --- Flask App Initialization ---
 app = Flask(__name__)
 
-# Add BOTH your local URL and your deployed Vercel URL here
+# Unified CORS configuration
+# Note: Removed the trailing slash from the Vercel URL
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://geonexus-ai.vercel.app" # REMOVED the trailing slash
+    "https://geonexus-ai.vercel.app"
 ]
 
-CORS(
-    app,
-    resources={r"/*": {
-        "origins": ALLOWED_ORIGINS
-    }},
-    methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"]
-)
+CORS(app, resources={r"/*": {
+    "origins": ALLOWED_ORIGINS,
+    "methods": ["GET", "POST", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "Accept"]
+}})
+
+# REMOVE the @app.after_request function entirely. 
+# The CORS extension above handles everything more safely.
 # @app.after_request
 # def add_cors_headers(response):
 #     # This allows your frontend origin dynamically
@@ -96,20 +97,7 @@ CORS(
 #     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
 #     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
 #     return response
-@app.after_request
-def add_cors_headers(response):
-    # Get the origin of the request (e.g., localhost or vercel)
-    origin = request.headers.get('Origin')
-    
-    # Check if the origin is in your allowed list
-    if origin in ALLOWED_ORIGINS:
-        response.headers.add('Access-Control-Allow-Origin', origin)
-        
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    # Required for some browsers to accept the response
-    response.headers.add('Access-Control-Allow-Credentials', 'true') 
-    return response
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
