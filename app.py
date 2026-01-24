@@ -72,31 +72,34 @@ else:
 # --- Flask App Initialization ---
 app = Flask(__name__)
 
-# Unified CORS configuration
-# Note: Removed the trailing slash from the Vercel URL
+# 1. Standardize Allowed Origins (Ensure NO trailing slashes)
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "https://geonexus-ai.vercel.app"
 ]
 
+# 2. Configure CORS correctly
+# We remove supports_credentials to make it easier for local/prod testing
 CORS(app, resources={r"/*": {
     "origins": ALLOWED_ORIGINS,
     "methods": ["GET", "POST", "OPTIONS"],
     "allow_headers": ["Content-Type", "Authorization", "Accept"]
 }})
 
-# REMOVE the @app.after_request function entirely. 
-# The CORS extension above handles everything more safely.
-# @app.after_request
-# def add_cors_headers(response):
-#     # This allows your frontend origin dynamically
-#     origin = request.headers.get('Origin')
-#     if origin in ALLOWED_ORIGINS:
-#         response.headers.add('Access-Control-Allow-Origin', origin)
-#     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-#     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-#     return response
+# 3. Use a SAFER header injector that doesn't duplicate
+@app.after_request
+def handle_options_and_headers(response):
+    origin = request.headers.get('Origin')
+    if origin in ALLOWED_ORIGINS:
+        # Flask-CORS handles the 'Access-Control-Allow-Origin' header, 
+        # so we only add extra security if missing
+        if 'Access-Control-Allow-Origin' not in response.headers:
+            response.headers.add('Access-Control-Allow-Origin', origin)
+            
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
