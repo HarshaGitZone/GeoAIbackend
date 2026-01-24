@@ -60,11 +60,29 @@ else:
 
 
 # --- Flask App Initialization ---
+# app = Flask(__name__)
+# CORS(
+#     app,
+#     resources={r"/*": {"origins": "*"}},
+#     supports_credentials=True,
+#     methods=["GET", "POST", "OPTIONS"],
+#     allow_headers=["Content-Type", "Authorization"]
+# )
+# --- Flask App Initialization ---
+# --- Flask App Initialization ---
 app = Flask(__name__)
+
+# Add BOTH your local URL and your deployed Vercel URL here
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "https://your-project-name.vercel.app" # Replace with your actual Vercel domain
+]
+
 CORS(
     app,
-    resources={r"/*": {"origins": "*"}},
-    supports_credentials=True,
+    resources={r"/*": {
+        "origins": ALLOWED_ORIGINS
+    }},
     methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"]
 )
@@ -148,8 +166,11 @@ def health():
     return jsonify({"status": "healthy"}), 200
 
 
-@app.route('/ask_geogpt', methods=['POST'])
+@app.route('/ask_geogpt', methods=['POST','OPTIONS'])
 def ask_geogpt():
+    if request.method == 'OPTIONS':
+        # This handles the preflight handshake perfectly
+        return jsonify({"status": "ok"}), 200
     data = request.json or {}
     user_query = data.get('query')
     chat_history = data.get('history', [])
@@ -398,10 +419,10 @@ def get_history():
         return jsonify({"error": str(e)}), 500
     
 # --- 2. Suitability Analysis Route ---
-@app.route('/suitability', methods=['POST'])
+@app.route('/suitability', methods=['POST','OPTIONS'])
 def suitability():
-    # if request.method == 'OPTIONS':
-    #     return jsonify({}), 200
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
     try:
         data = request.json or {}
         latitude = float(data.get("latitude", 17.3850))
