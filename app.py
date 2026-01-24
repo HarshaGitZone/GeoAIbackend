@@ -7,35 +7,30 @@ from datetime import datetime
 import logging
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from flask import Flask, request, jsonify
 import logging
-
-# log = logging.getLogger('werkzeug')
-# log.setLevel(logging.ERROR)
-# Load environment variables
+from dotenv import load_dotenv
+# 2. Load the variables IMMEDIATELY after imports
 load_dotenv()
 
-# --- Initialize Logging (FIXES YOUR ERROR) ---
+# --- Initialize Logging ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-# Silence the noisy werkzeug logs
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
-# --- CRITICAL: Path Injection to ensure geogpt_config is found ---
-
-from google import genai 
+# --- CRITICAL: Custom Project Imports ---
 from geogpt_config import generate_system_prompt 
 from reports.pdf_generator import generate_land_report
 from integrations.nearby_places import get_nearby_named_places
 from integrations.terrain_adapter import estimate_terrain_slope
+
+
+from google import genai 
 from flask import send_file
 from dotenv import load_dotenv
+from groq import Groq
+from dotenv import load_dotenv
 load_dotenv()
-# Import your AI library (OpenAI/Gemini/etc.)
-# --- Configuration & Path Logic ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "ml", "models")
 
 
 
@@ -51,22 +46,66 @@ from integrations import (
     estimate_rainfall_score,
     nearby_places,
 )
+# Import your AI library (OpenAI/Gemini/etc.)
+# --- Configuration & Path Logic ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "ml", "models") 
 
 
 
+# GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+# GROQ_KEY = os.getenv("GROQ_API_KEY") # Add this to your .env
+
+# client = None
+# if not GEMINI_KEY:
+#     logging.warning("GEMINI_API_KEY not found in environment variables!")
+# else:
+#     try:
+#         client = genai.Client(api_key=GEMINI_KEY)
+#         logging.info("Gemini client initialized successfully.")
+#     except Exception as e:
+#         logging.error(f"Error initializing Gemini client: {e}")
+
+# # Initialize Groq Client
+# groq_client = None
+# if GROQ_KEY:
+#     groq_client = Groq(api_key=GROQ_KEY)
+
+
+# ... existing imports ...
+
+# Load keys
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_KEY = os.getenv("GROQ_API_KEY")
 
+# --- Initialize Gemini Client ---
 client = None
-if not GEMINI_KEY:
-    logging.warning("GEMINI_API_KEY not found in environment variables!")
-else:
+if GEMINI_KEY:
     try:
         client = genai.Client(api_key=GEMINI_KEY)
-        logging.info("Gemini client initialized successfully.")
+        logging.info("✅ Gemini client initialized.")
     except Exception as e:
-        logging.error(f"Error initializing Gemini client: {e}")
+        logging.error(f"❌ Gemini Init Failed: {e}")
+else:
+    logging.warning("⚠️ GEMINI_API_KEY missing.")
 
+# --- Initialize Groq Client (Fallback) ---
+groq_client = None
+if GROQ_KEY:
+    try:
+        # Standard Groq initialization
+        groq_client = Groq(api_key=GROQ_KEY)
+        logging.info("✅ Groq fallback client initialized.")
+    except Exception as e:
+        logging.error(f"❌ Groq Init Failed: {e}")
+else:
+    logging.warning("⚠️ GROQ_API_KEY missing. Fallback engine will be unavailable.")
 
+# Quick Console Summary for you
+print(f"--- GeoAI Engine Status ---")
+print(f"Primary (Gemini): {'READY' if client else 'OFFLINE'}")
+print(f"Fallback (Groq):  {'READY' if groq_client else 'OFFLINE'}")
+print(f"---------------------------")
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
@@ -175,69 +214,159 @@ def health():
     return jsonify({"status": "healthy"}), 200
 
 
+# @app.route('/ask_geogpt', methods=['POST'])
+# def ask_geogpt():
+#     # if request.method == 'OPTIONS':
+#     #     # This handles the preflight handshake perfectly
+#     #     return jsonify({"status": "ok"}), 200
+#     data = request.json or {}
+#     user_query = data.get('query')
+#     chat_history = data.get('history', [])
+#     current_data = data.get('currentData')  # Site A
+#     compare_data = data.get('compareData')  # Site B (Now included!)
+#     location_name = data.get('locationName')
+
+#     if not current_data:
+#         return jsonify({"answer": "### 🌍 Intelligence Awaiting\nPlease analyze a location on the map first so I can access the geospatial data stream!"})
+
+#     if not GEMINI_KEY or not client:
+#         return jsonify({"answer": "### ⚠️ System Offline\nI'm currently disconnected from my AI core. Please verify API configuration."})
+
+#     try:
+#         # Convert history format for Gemini SDK
+#         formatted_history = []
+#         # for msg in chat_history:
+#         #     role = "user" if msg['role'] == 'user' else "model"
+#         #     formatted_history.append({"role": role, "parts": [{"text": msg['content']}]})
+        
+#         # To this (Slicing the last 6 messages only):
+#         for msg in chat_history[-6:]: 
+#             role = "user" if msg['role'] == 'user' else "model"
+#             formatted_history.append({"role": role, "parts": [{"text": msg['content']}]})
+        
+#         # Inject context for both sites + project meta-info
+#         system_context = generate_system_prompt(location_name, current_data, compare_data)
+
+#         chat_session = client.chats.create(
+#             model="gemini-2.0-flash", 
+#             config={
+#                 "system_instruction": system_context,
+#                 "temperature": 0.7, 
+#             },
+#             history=formatted_history
+#         )
+
+#         response = chat_session.send_message(user_query)
+        
+#         return jsonify({
+#             "answer": response.text,
+#             "status": "success"
+#         })
+
+#     except Exception as e:
+#         error_msg = str(e)
+#         logger.error(f"GeoGPT API Error: {error_msg}")
+
+#         # FIX: Handling Rate Limit (429 RESOURCE_EXHAUSTED)
+#         if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+#             return jsonify({
+#                 "answer": "### ⚠️ System Quota Exhausted\nGeoGPT (Free Tier) has hit its request limit. Please **wait 30-60 seconds** for the engine to cool down before your next query.",
+#                 "status": "rate_limit"
+#             })
+
+#         # General error fallback
+#         return jsonify({"answer": "### ⚠️ Cognitive Lapse\nI encountered an error processing that request. Please try again in a moment."}), 500
 @app.route('/ask_geogpt', methods=['POST'])
 def ask_geogpt():
-    # if request.method == 'OPTIONS':
-    #     # This handles the preflight handshake perfectly
-    #     return jsonify({"status": "ok"}), 200
     data = request.json or {}
     user_query = data.get('query')
     chat_history = data.get('history', [])
     current_data = data.get('currentData')  # Site A
-    compare_data = data.get('compareData')  # Site B (Now included!)
+    compare_data = data.get('compareData')  # Site B
     location_name = data.get('locationName')
 
     if not current_data:
         return jsonify({"answer": "### 🌍 Intelligence Awaiting\nPlease analyze a location on the map first so I can access the geospatial data stream!"})
 
-    if not GEMINI_KEY or not client:
-        return jsonify({"answer": "### ⚠️ System Offline\nI'm currently disconnected from my AI core. Please verify API configuration."})
+    # Check if we have at least one engine available
+    if not (client or groq_client):
+        return jsonify({"answer": "### ⚠️ Systems Offline\nBoth primary (Gemini) and fallback (Groq) engines are unconfigured. Please check your API keys."})
 
-    try:
-        # Convert history format for Gemini SDK
-        formatted_history = []
-        # for msg in chat_history:
-        #     role = "user" if msg['role'] == 'user' else "model"
-        #     formatted_history.append({"role": role, "parts": [{"text": msg['content']}]})
-        
-        # To this (Slicing the last 6 messages only):
-        for msg in chat_history[-6:]: 
-            role = "user" if msg['role'] == 'user' else "model"
-            formatted_history.append({"role": role, "parts": [{"text": msg['content']}]})
-        
-        # Inject context for both sites + project meta-info
-        system_context = generate_system_prompt(location_name, current_data, compare_data)
+    # 1. Prepare shared context
+    system_context = generate_system_prompt(location_name, current_data, compare_data)
 
-        chat_session = client.chats.create(
-            model="gemini-2.0-flash", 
-            config={
-                "system_instruction": system_context,
-                "temperature": 0.7, 
-            },
-            history=formatted_history
-        )
+    # --- PRIMARY ATTEMPT: GEMINI ---
+    if client:
+        try:
+            # Format history for Gemini
+            formatted_history_gemini = []
+            for msg in chat_history[-6:]: 
+                role = "user" if msg['role'] == 'user' else "model"
+                formatted_history_gemini.append({"role": role, "parts": [{"text": msg['content']}]})
 
-        response = chat_session.send_message(user_query)
-        
-        return jsonify({
-            "answer": response.text,
-            "status": "success"
-        })
+            chat_session = client.chats.create(
+                model="gemini-2.0-flash", 
+                config={
+                    "system_instruction": system_context,
+                    "temperature": 0.7, 
+                },
+                history=formatted_history_gemini
+            )
 
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"GeoGPT API Error: {error_msg}")
-
-        # FIX: Handling Rate Limit (429 RESOURCE_EXHAUSTED)
-        if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+            response = chat_session.send_message(user_query)
+            
             return jsonify({
-                "answer": "### ⚠️ System Quota Exhausted\nGeoGPT (Free Tier) has hit its request limit. Please **wait 30-60 seconds** for the engine to cool down before your next query.",
-                "status": "rate_limit"
+                "answer": response.text,
+                "status": "success"
             })
 
-        # General error fallback
-        return jsonify({"answer": "### ⚠️ Cognitive Lapse\nI encountered an error processing that request. Please try again in a moment."}), 500
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Gemini Error: {error_msg}")
 
+            # If it's NOT a rate limit error, and Groq isn't available, fail early
+            is_rate_limit = any(x in error_msg for x in ["429", "RESOURCE_EXHAUSTED", "quota"])
+            if not is_rate_limit or not groq_client:
+                return jsonify({"answer": f"### ⚠️ Gemini Error\n{error_msg}"}), 500
+
+    # --- FALLBACK ATTEMPT: GROQ ---
+    # This runs if Gemini failed due to rate limits OR if Gemini client wasn't initialized
+    if groq_client:
+        try:
+            logger.info("Engaging Groq Fallback Engine...")
+            
+            # Format history for Groq (Standard OpenAI style)
+            formatted_history_groq = []
+            for msg in chat_history[-6:]:
+                role = "user" if msg['role'] == 'user' else "assistant"
+                formatted_history_groq.append({"role": role, "content": msg['content']})
+
+            # Prepend system context as a system message
+            messages = [
+                {"role": "system", "content": system_context}
+            ] + formatted_history_groq + [
+                {"role": "user", "content": user_query}
+            ]
+
+            completion = groq_client.chat.completions.create(
+                # model="llama3-70b-8192", # High-capacity model
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                temperature=0.7,
+            )
+
+            fallback_answer = completion.choices[0].message.content
+            
+            return jsonify({
+                "answer": fallback_answer + "\n\n*(⚡ Fallback Engine Active)*",
+                "status": "success_fallback"
+            })
+
+        except Exception as groq_e:
+            logger.error(f"Groq Fallback Error: {groq_e}")
+            return jsonify({"answer": "### ⚠️ Total System Exhaustion\nBoth Gemini and Groq are currently unavailable."}), 500
+
+    return jsonify({"answer": "### ⚠️ Cognitive Lapse\nUnable to process request with available engines."}), 500
 import requests
 import math
 
