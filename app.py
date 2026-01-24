@@ -75,7 +75,8 @@ app = Flask(__name__)
 # Add BOTH your local URL and your deployed Vercel URL here
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
-    "https://your-project-name.vercel.app" # Replace with your actual Vercel domain
+    "http://127.0.0.1:3000",
+    "https://geonexus-ai.vercel.app" # REMOVED the trailing slash
 ]
 
 CORS(
@@ -86,7 +87,29 @@ CORS(
     methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"]
 )
- 
+# @app.after_request
+# def add_cors_headers(response):
+#     # This allows your frontend origin dynamically
+#     origin = request.headers.get('Origin')
+#     if origin in ALLOWED_ORIGINS:
+#         response.headers.add('Access-Control-Allow-Origin', origin)
+#     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+#     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+#     return response
+@app.after_request
+def add_cors_headers(response):
+    # Get the origin of the request (e.g., localhost or vercel)
+    origin = request.headers.get('Origin')
+    
+    # Check if the origin is in your allowed list
+    if origin in ALLOWED_ORIGINS:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    # Required for some browsers to accept the response
+    response.headers.add('Access-Control-Allow-Credentials', 'true') 
+    return response
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -317,9 +340,11 @@ def get_snapshot_identity(lat, lon, timeout=10):
         }
     except Exception:
         return {"error": "Resolution Failed"}
-@app.route("/snapshot_identity", methods=["POST"])
+@app.route("/snapshot_identity", methods=["POST","OPTIONS"])
 def snapshot_identity_route():
-  
+
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
 
     try:
         data = request.json or {}
@@ -379,8 +404,10 @@ def calculate_historical_suitability(current_lat, current_lng, range_type):
     
     # For now, we simulate the drift on the scores directly for the UI
     return multiplier * 100
-@app.route('/history_analysis', methods=['POST'])
+@app.route('/history_analysis', methods=['POST','OPTIONS'])
 def get_history():
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
     data = request.json
     lat = data.get('latitude')
     lng = data.get('longitude')
@@ -422,7 +449,7 @@ def get_history():
 @app.route('/suitability', methods=['POST','OPTIONS'])
 def suitability():
     if request.method == 'OPTIONS':
-        return jsonify({}), 200
+        return jsonify({"status": "ok"}), 200
     try:
         data = request.json or {}
         latitude = float(data.get("latitude", 17.3850))
@@ -747,8 +774,10 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
 #         logger.exception("Internal PDF Generation Error")
 #         return jsonify({"error": str(e)}), 500
 
-@app.route("/generate_report", methods=["POST"])
+@app.route("/generate_report", methods=["POST", "OPTIONS"])
 def generate_report():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
     try:
         data = request.json
         if not data:
@@ -802,10 +831,10 @@ def generate_report():
         logger.exception("Internal PDF Generation Error")
         return jsonify({"error": "Failed to generate tactical report. See server logs."}), 500
     
-@app.route("/nearby_places", methods=["POST"])
+@app.route("/nearby_places", methods=["POST","OPTIONS"])
 def nearby_places_route():
-    # if request.method == "OPTIONS":
-    #     return jsonify({}), 200
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
 
     try:
         data = request.json or {}
