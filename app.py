@@ -614,6 +614,114 @@ def global_options(path):
 #             "error": "History engine crashed",
 #             "details": str(e)
 #         }), 500
+# @app.route('/history_analysis', methods=['POST', 'OPTIONS'])
+# def get_history():
+#     # Handle the CORS preflight handshake for deployment
+#     if request.method == 'OPTIONS':
+#         return jsonify({"status": "ok"}), 200
+
+#     try:
+#         data = request.get_json(force=True, silent=True)
+#         if not data:
+#             return jsonify({"error": "No JSON body received"}), 400
+
+#         lat = float(data.get('latitude'))
+#         lng = float(data.get('longitude'))
+
+#         if lat is None or lng is None:
+#             return jsonify({"error": "Missing latitude or longitude"}), 400
+        
+#         # 1. Fetch CURRENT state baseline
+#         current_suitability = _perform_suitability_analysis(lat, lng)
+#         f = current_suitability['factors']
+        
+#         # 2. Determine Local Urbanization Decay Rate
+#         is_urban = f.get('proximity', 50) > 60
+#         decay_rate = 0.02 if is_urban else 0.005 # Faster reversion for urban hubs
+
+#         # 3. Generate Complete Bundle for Temporal Slider
+#         timelines = ['1W', '1M', '1Y', '10Y']
+#         history_bundle = {}
+
+#         for t_key in timelines:
+#             # Map time range to scientific year offsets
+#             years_map = {'1W': 1.0/52.0, '1M': 1.0/12.0, '1Y': 1.0, '10Y': 10.0}
+#             offset = years_map[t_key]
+            
+#             # Reconstruction Multiplier (Backwards in time logic)
+#             rev_mult = (1.0 - (decay_rate * offset))
+            
+#             # --- FACTOR RECONSTRUCTION ---
+#             p_prox = f.get('proximity', 50) * rev_mult
+#             p_land = min(100, f.get('landuse', 50) / rev_mult) # More green in the past
+#             p_flood = min(100, f.get('flood', 50) * (1.0 + (decay_rate * offset * 0.5)))
+#             p_soil = min(100, f.get('soil', 50) * (1.0 + (decay_rate * offset)))
+            
+#             # Fetch actual climate data from archives for that period
+#             p_rain_mm = fetch_historical_weather_stats(lat, lng, int(offset) if offset >= 1 else 1)
+#             p_rain_score = 100 - (p_rain_mm / 10) if p_rain_mm < 800 else 20
+            
+#             # --- ML ENSEMBLE PREDICTION ---
+#             # Features: [Rain, Flood, Landslide, Soil, Prox, Water, Poll, Landuse]
+#             feat = np.array([[
+#                 p_rain_score, 
+#                 p_flood, 
+#                 f.get('landslide', 50), 
+#                 p_soil, 
+#                 p_prox, 
+#                 f.get('water', 50), 
+#                 f.get('pollution', 50) + (2 * offset), # Air was cleaner in the past
+#                 p_land
+#             ]], dtype=float)
+            
+#             p_score = round((float(ML_MODELS['model_xgboost.pkl'].predict(feat)[0]) + 
+#                             float(ML_MODELS['model_rf.pkl'].predict(feat)[0])) / 2, 2)
+            
+#             # --- URBANIZATION VELOCITY (The Derivative) ---
+#             prox_change = f.get('proximity', 50) - p_prox
+#             land_change = p_land - f.get('landuse', 50)
+            
+#             # Normalize change by time to get the 'Speed of Development'
+#             raw_velocity = (prox_change + land_change) / (2 * offset)
+            
+#             # Map to 0-10 scale for the UI Gauge
+#             velocity_score = min(10, max(0, raw_velocity * 4)) 
+            
+#             velocity_label = "Stable"
+#             if velocity_score > 7: velocity_label = "Hyper-Growth"
+#             elif velocity_score > 3: velocity_label = "Expanding"
+
+#             # 4. Construct the Timeline Object (Prevents KeyError)
+#             history_bundle[t_key] = {
+#                 "score": p_score,
+#                 "velocity": {
+#                     "score": round(velocity_score, 2),
+#                     "label": velocity_label
+#                 },
+#                 "drifts": {
+#                     "rainfall": round(p_rain_score - f.get('rainfall', 0), 2),
+#                     "proximity": round(p_prox - f.get('proximity', 0), 2),
+#                     "landuse": round(p_land - f.get('landuse', 0), 2),
+#                     "flood": round(p_flood - f.get('flood', 0), 2),
+#                     "soil": round(p_soil - f.get('soil', 0), 2),
+#                     "pollution": round(offset * 2.0, 2),
+#                     "water": 0.0, 
+#                     "landslide": 0.0
+#                 }
+#             }
+
+#         return jsonify({
+#             "current_score": current_suitability['suitability_score'],
+#             "history_bundle": history_bundle,
+#             "status": "success"
+#         })
+
+#     except Exception as e:
+#         logger.exception("CRITICAL: History Analysis Engine Failure")
+#         return jsonify({
+#             "error": "History engine crashed",
+#             "details": str(e)
+#         }), 500
 @app.route('/history_analysis', methods=['POST', 'OPTIONS'])
 def get_history():
     # Handle the CORS preflight handshake for deployment
@@ -662,7 +770,6 @@ def get_history():
             p_rain_score = 100 - (p_rain_mm / 10) if p_rain_mm < 800 else 20
             
             # --- ML ENSEMBLE PREDICTION ---
-            # Features: [Rain, Flood, Landslide, Soil, Prox, Water, Poll, Landuse]
             feat = np.array([[
                 p_rain_score, 
                 p_flood, 
@@ -670,7 +777,7 @@ def get_history():
                 p_soil, 
                 p_prox, 
                 f.get('water', 50), 
-                f.get('pollution', 50) + (2 * offset), # Air was cleaner in the past
+                f.get('pollution', 50) + (2 * offset), 
                 p_land
             ]], dtype=float)
             
@@ -680,23 +787,24 @@ def get_history():
             # --- URBANIZATION VELOCITY (The Derivative) ---
             prox_change = f.get('proximity', 50) - p_prox
             land_change = p_land - f.get('landuse', 50)
-            
-            # Normalize change by time to get the 'Speed of Development'
             raw_velocity = (prox_change + land_change) / (2 * offset)
             
-            # Map to 0-10 scale for the UI Gauge
             velocity_score = min(10, max(0, raw_velocity * 4)) 
-            
             velocity_label = "Stable"
             if velocity_score > 7: velocity_label = "Hyper-Growth"
             elif velocity_score > 3: velocity_label = "Expanding"
 
-            # 4. Construct the Timeline Object (Prevents KeyError)
+            # 4. Construct the Timeline Object
             history_bundle[t_key] = {
                 "score": p_score,
                 "velocity": {
                     "score": round(velocity_score, 2),
                     "label": velocity_label
+                },
+                # NEW: Terrain density data for the Triple Mini-Map
+                "terrain": {
+                    "urban_density": round(p_prox, 2),
+                    "nature_density": round(p_land, 2)
                 },
                 "drifts": {
                     "rainfall": round(p_rain_score - f.get('rainfall', 0), 2),
