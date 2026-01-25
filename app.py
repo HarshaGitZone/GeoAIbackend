@@ -782,15 +782,30 @@ def fetch_historical_weather_stats(lat, lng, year_offset):
 #         })
 #     except Exception as e:
 #         return jsonify({"error": str(e)}), 500
+@app.route('/<path:path>', methods=['OPTIONS'])
+def global_options(path):
+    return jsonify({"status": "ok"}), 200
+
 @app.route('/history_analysis', methods=['POST','OPTIONS'])
 def get_history():
     # Handle the CORS preflight request from the browser
     if request.method == 'OPTIONS':
         return jsonify({"status": "ok"}), 200
-    data = request.json
+    # data = request.json
+    # try:
+    #     lat = float(data.get('latitude'))
+    #     lng = float(data.get('longitude'))
     try:
+        data = request.get_json(force=True, silent=True)
+
+        if not data:
+            return jsonify({"error": "No JSON body received"}), 400
+
         lat = float(data.get('latitude'))
         lng = float(data.get('longitude'))
+
+        if lat is None or lng is None:
+            return jsonify({"error": "Missing latitude or longitude"}), 400
         
         # 1. Fetch CURRENT Baseline
         current_suitability = _perform_suitability_analysis(lat, lng)
@@ -840,8 +855,14 @@ def get_history():
             "history_bundle": history_bundle, # Changed from 'history_data' to match Frontend
             "status": "success"
         })
+    # except Exception as e:
+    #     return jsonify({"error": str(e)}), 500
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.exception("History Analysis Failure")
+        return jsonify({
+            "error": "History engine crashed",
+            "details": str(e)
+        }), 500
 def calculate_historical_suitability(current_lat, current_lng, range_type):
     # 1. Start with current features
     # 2. Apply "Environmental Drift" based on the time range
