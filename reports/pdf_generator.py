@@ -5,6 +5,7 @@ import numpy as np
 import io
 import os
 import requests
+import qrcode
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -115,6 +116,43 @@ def _draw_location_analysis(c, data, title_prefix, width, height):
     # 1. HEADER
     c.setFillColor(COLOR_DEEP_NAVY)
     c.rect(0, height - 100, width, 100, fill=1, stroke=0)
+    # --- NEW: QR CODE SECTION (Top Right) ---
+    # Expecting 'shareLink' to be passed in the data payload from frontend
+    share_url = data.get('shareLink')
+    if share_url:
+        try:
+            # Generate QR Code
+            qr = qrcode.QRCode(version=1, box_size=10, border=2)
+            qr.add_data(share_url)
+            qr.make(fit=True)
+            qr_img = qr.make_image(fill_color="black", back_color="white")
+            
+            # Convert to ReportLab-friendly format
+            qr_buffer = io.BytesIO()
+            qr_img.save(qr_buffer, format='PNG')
+            qr_buffer.seek(0)
+            
+            # Draw QR Box and Label
+            c.setFillColor(colors.white)
+            c.roundRect(width - 95, height - 90, 80, 80, 4, fill=1, stroke=0)
+            c.drawImage(ImageReader(qr_buffer), width - 90, height - 82, width=70, height=70)
+            # --- STYLED "BUTTON" SECTION ---
+            # Draw a green button-like rectangle
+            btn_x, btn_y, btn_w, btn_h = width - 90, height - 88, 70, 10
+            c.setFillColor(COLOR_SUCCESS)
+            c.roundRect(btn_x, btn_y, btn_w, btn_h, 2, fill=1, stroke=0)
+
+            c.setFillColor(colors.white)
+            c.setFont("Helvetica-Bold", 6)
+            # c.drawCentredString(width - 55, height - 88, "SCAN FOR LIVE")
+            c.drawCentredString(width - 55, btn_y + 3, "OPEN LINK")
+            # CREATE THE CLICKABLE LINK AREA
+            # This makes the button area in the PDF act as a hyperlink
+            c.linkURL(share_url, (btn_x, btn_y, btn_x + btn_w, btn_y + btn_h), relative=0)
+            
+            
+        except Exception as e:
+            print(f"QR Generation Error: {e}")
     c.setFillColor(colors.white)
     c.setFont("Helvetica-Bold", 20)
     c.drawCentredString(width / 2, height - 40, "GeoAI – Land Suitability Certificate")
