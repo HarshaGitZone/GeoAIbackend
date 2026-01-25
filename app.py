@@ -9,7 +9,6 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import logging
 from dotenv import load_dotenv
-# 2. Load the variables IMMEDIATELY after imports
 load_dotenv()
 
 # --- Initialize Logging ---
@@ -18,7 +17,6 @@ logger = logging.getLogger(__name__)
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
-# --- CRITICAL: Custom Project Imports ---
 from geogpt_config import generate_system_prompt 
 from reports.pdf_generator import generate_land_report
 from integrations.nearby_places import get_nearby_named_places
@@ -52,29 +50,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "ml", "models") 
 
 
-
-# GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-# GROQ_KEY = os.getenv("GROQ_API_KEY") # Add this to your .env
-
-# client = None
-# if not GEMINI_KEY:
-#     logging.warning("GEMINI_API_KEY not found in environment variables!")
-# else:
-#     try:
-#         client = genai.Client(api_key=GEMINI_KEY)
-#         logging.info("Gemini client initialized successfully.")
-#     except Exception as e:
-#         logging.error(f"Error initializing Gemini client: {e}")
-
-# # Initialize Groq Client
-# groq_client = None
-# if GROQ_KEY:
-#     groq_client = Groq(api_key=GROQ_KEY)
-
-
-# ... existing imports ...
-
-# Load keys
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_KEY = os.getenv("GROQ_API_KEY")
 
@@ -214,68 +189,6 @@ def health():
     return jsonify({"status": "healthy"}), 200
 
 
-# @app.route('/ask_geogpt', methods=['POST'])
-# def ask_geogpt():
-#     # if request.method == 'OPTIONS':
-#     #     # This handles the preflight handshake perfectly
-#     #     return jsonify({"status": "ok"}), 200
-#     data = request.json or {}
-#     user_query = data.get('query')
-#     chat_history = data.get('history', [])
-#     current_data = data.get('currentData')  # Site A
-#     compare_data = data.get('compareData')  # Site B (Now included!)
-#     location_name = data.get('locationName')
-
-#     if not current_data:
-#         return jsonify({"answer": "### 🌍 Intelligence Awaiting\nPlease analyze a location on the map first so I can access the geospatial data stream!"})
-
-#     if not GEMINI_KEY or not client:
-#         return jsonify({"answer": "### ⚠️ System Offline\nI'm currently disconnected from my AI core. Please verify API configuration."})
-
-#     try:
-#         # Convert history format for Gemini SDK
-#         formatted_history = []
-#         # for msg in chat_history:
-#         #     role = "user" if msg['role'] == 'user' else "model"
-#         #     formatted_history.append({"role": role, "parts": [{"text": msg['content']}]})
-        
-#         # To this (Slicing the last 6 messages only):
-#         for msg in chat_history[-6:]: 
-#             role = "user" if msg['role'] == 'user' else "model"
-#             formatted_history.append({"role": role, "parts": [{"text": msg['content']}]})
-        
-#         # Inject context for both sites + project meta-info
-#         system_context = generate_system_prompt(location_name, current_data, compare_data)
-
-#         chat_session = client.chats.create(
-#             model="gemini-2.0-flash", 
-#             config={
-#                 "system_instruction": system_context,
-#                 "temperature": 0.7, 
-#             },
-#             history=formatted_history
-#         )
-
-#         response = chat_session.send_message(user_query)
-        
-#         return jsonify({
-#             "answer": response.text,
-#             "status": "success"
-#         })
-
-#     except Exception as e:
-#         error_msg = str(e)
-#         logger.error(f"GeoGPT API Error: {error_msg}")
-
-#         # FIX: Handling Rate Limit (429 RESOURCE_EXHAUSTED)
-#         if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-#             return jsonify({
-#                 "answer": "### ⚠️ System Quota Exhausted\nGeoGPT (Free Tier) has hit its request limit. Please **wait 30-60 seconds** for the engine to cool down before your next query.",
-#                 "status": "rate_limit"
-#             })
-
-#         # General error fallback
-#         return jsonify({"answer": "### ⚠️ Cognitive Lapse\nI encountered an error processing that request. Please try again in a moment."}), 500
 @app.route('/ask_geogpt', methods=['POST'])
 def ask_geogpt():
     data = request.json or {}
@@ -524,246 +437,64 @@ def fetch_historical_weather_stats(lat, lng, year_offset):
         logger.error(f"Historical Weather Error: {e}")
         return 150.0
 
-# @app.route('/history_analysis', methods=['POST'])
+
+@app.route('/<path:path>', methods=['OPTIONS'])
+def global_options(path):
+    return jsonify({"status": "ok"}), 200
+
+# @app.route('/history_analysis', methods=['POST','OPTIONS'])
 # def get_history():
-#     data = request.json
-#     lat = float(data.get('latitude'))
-#     lng = float(data.get('longitude'))
-#     range_type = data.get('range', '10Y')
-    
-#     # 1. Map range to years
-#     years_map = {'1W': 0, '1M': 0, '1Y': 1, '10Y': 10}
-#     year_offset = years_map.get(range_type, 10)
-
+#     # Handle the CORS preflight request from the browser
+#     if request.method == 'OPTIONS':
+#         return jsonify({"status": "ok"}), 200
+#     # data = request.json
+#     # try:
+#     #     lat = float(data.get('latitude'))
+#     #     lng = float(data.get('longitude'))
 #     try:
-#         # 2. GET CURRENT BASELINE (From your existing logic)
-#         # We simulate the features for Site A
-#         current_suitability = _perform_suitability_analysis(lat, lng)
-#         f = current_suitability['factors']
-        
-#         # 3. APPLY GEOSPATIAL REVERSION (The Science)
-#         # If current proximity is high (Urban), it was likely lower 10 years ago (Urbanization)
-#         # We assume a 1.5% annual 'decay' in amenities as we go back in time
-#         reversion_factor = (1 - (0.015 * year_offset))
-        
-#         past_proximity = f['proximity'] * reversion_factor
-#         # Landuse (Vegetation) is the inverse: less urban = more green
-#         past_landuse = min(100, f['landuse'] / reversion_factor)
-        
-#         # 4. FETCH REAL HISTORICAL RAINFALL
-#         past_rain_mm = fetch_historical_weather_stats(lat, lng, year_offset)
-#         # Re-calculate rainfall score using your existing estimator logic (simplified here)
-#         past_rainfall_score = 100 - (past_rain_mm / 10) if past_rain_mm < 800 else 20
-        
-#         # 5. RE-RUN ENSEMBLE PREDICTION FOR THE PAST
-#         # Features: [rainfall, flood, landslide, soil, proximity, water, poll, landuse]
-#         past_features = np.array([[
-#             past_rainfall_score, 
-#             f['flood'], # Flood risk is tied to rain/landuse
-#             f['landslide'], 
-#             f['soil'], 
-#             past_proximity, 
-#             f['water'], 
-#             f['pollution'] + (2 * year_offset), # Assume 2% cleaner air per year back
-#             past_landuse
-#         ]], dtype=float)
+#         data = request.get_json(force=True, silent=True)
 
-#         score_xgb = float(ML_MODELS['model_xgboost.pkl'].predict(past_features)[0])
-#         score_rf = float(ML_MODELS['model_rf.pkl'].predict(past_features)[0])
-#         past_final_score = round((score_xgb + score_rf) / 2, 2)
+#         if not data:
+#             return jsonify({"error": "No JSON body received"}), 400
 
-#         return jsonify({
-#             "historical_score": past_final_score,
-#             "current_score": current_suitability['suitability_score'],
-#             "drift_analysis": {
-#                 "rainfall_change": round(past_rainfall_score - f['rainfall'], 2),
-#                 "urban_expansion": round(f['proximity'] - past_proximity, 2),
-#                 "vegetation_loss": round(past_landuse - f['landuse'], 2)
-#             },
-#             "observation": f"In {datetime.now().year - year_offset}, this site had {round(past_landuse - f['landuse'])}% more natural cover."
-#         })
-#     except Exception as e:
-#         logger.error(f"History Route Error: {e}")
-#         return jsonify({"error": str(e)}), 500
-# @app.route('/history_analysis', methods=['POST'])
-# def get_history():
-#     data = request.json
-#     try:
 #         lat = float(data.get('latitude'))
 #         lng = float(data.get('longitude'))
-#         range_type = data.get('range', '10Y')
-        
-#         # 1. Map time range to actual year offset
-#         years_map = {'1W': 0, '1M': 0, '1Y': 1, '10Y': 10}
-#         year_offset = years_map.get(range_type, 10)
 
-#         # 2. Get current baseline from your main analysis engine
+#         if lat is None or lng is None:
+#             return jsonify({"error": "Missing latitude or longitude"}), 400
+        
+#         # 1. Fetch CURRENT Baseline
 #         current_suitability = _perform_suitability_analysis(lat, lng)
 #         f = current_suitability['factors']
         
-#         # 3. Apply Reversion Logic (The math you asked for)
-#         is_urban = f.get('proximity', 50) > 60
-#         decay_rate = 0.02 if is_urban else 0.005 # Faster change for urban centers
-        
-#         # 🔥 PLACE YOUR LINE HERE: Force float math to avoid 0 results
-#         reversion_multiplier = (1.0 - (float(decay_rate) * float(year_offset)))
-        
-#         # 4. Reverse-Engineer the past factors
-#         past_proximity = round(f.get('proximity', 50) * reversion_multiplier, 2)
-#         past_landuse = round(min(100, f.get('landuse', 50) / reversion_multiplier), 2)
-        
-#         # 5. Fetch REAL historical weather data
-#         past_rain_mm = fetch_historical_weather_stats(lat, lng, year_offset)
-#         past_rainfall_score = round(100 - (past_rain_mm / 10) if past_rain_mm < 800 else 20, 2)
-        
-#         # 6. Re-run your ML Models (XGBoost + RF) with the "Past" data
-#         # Feature Order: [rainfall, flood, landslide, soil, proximity, water, poll, landuse]
-#         past_features = np.array([[
-#             past_rainfall_score, 
-#             f.get('flood', 50),
-#             f.get('landslide', 50), 
-#             f.get('soil', 50), 
-#             past_proximity, 
-#             f.get('water', 50), 
-#             min(100, f.get('pollution', 50) + (1.5 * year_offset)), # Air was cleaner
-#             past_landuse
-#         ]], dtype=float)
-
-#         score_xgb = float(ML_MODELS['model_xgboost.pkl'].predict(past_features)[0])
-#         score_rf = float(ML_MODELS['model_rf.pkl'].predict(past_features)[0])
-#         past_final_score = round((score_xgb + score_rf) / 2, 2)
-
-#         return jsonify({
-#             "historical_score": past_final_score,
-#             "current_score": current_suitability['suitability_score'],
-#             "drift_analysis": {
-#                 "rainfall_change": round(f.get('rainfall', 0) - past_rainfall_score, 2),
-#                 "urban_expansion": round(f.get('proximity', 0) - past_proximity, 2),
-#                 "vegetation_loss": round(past_landuse - f.get('landuse', 0), 2)
-#             },
-#             "observation": f"In {datetime.now().year - year_offset}, this site had {round(past_landuse - f['landuse'])}% more natural cover."
-#         })
-#     except Exception as e:
-#         logger.error(f"History Error: {e}")
-#         return jsonify({"error": "Sync Failure"}), 500
-
-# @app.route('/history_analysis', methods=['POST'])
-# def get_history():
-#     data = request.json
-#     try:
-#         lat = float(data.get('latitude'))
-#         lng = float(data.get('longitude'))
-#         range_type = data.get('range', '10Y')
-        
-#         # 1. SCALE TIME: Use fractional years to ensure 1W/1M are not 0
-#         years_map = {'1W': 1.0/52.0, '1M': 1.0/12.0, '1Y': 1.0, '10Y': 10.0}
-#         year_offset = float(years_map.get(range_type, 10.0))
-
-#         # 2. BASELINE: Current site state
-#         current_suitability = _perform_suitability_analysis(lat, lng)
-#         f = current_suitability['factors']
-        
-#         # 3. REVERSION MATH: Apply the decay rate
-#         is_urban = f.get('proximity', 50) > 60
-#         decay_rate = 0.02 if is_urban else 0.005 
-#         reversion_multiplier = (1.0 - (float(decay_rate) * year_offset))
-        
-#         # Calculate past states
-#         past_proximity = round(f.get('proximity', 50) * reversion_multiplier, 4)
-#         past_landuse = round(min(100, f.get('landuse', 50) / reversion_multiplier), 4)
-        
-#         # 4. WEATHER: Real archive data
-#         weather_offset = int(year_offset) if year_offset >= 1 else 1
-#         past_rain_mm = fetch_historical_weather_stats(lat, lng, weather_offset)
-#         past_rainfall_score = round(100 - (past_rain_mm / 10) if past_rain_mm < 800 else 20, 2)
-        
-#         # 5. PREDICTION: Pass to ML Ensemble
-#         reconstructed_features = np.array([[
-#             past_rainfall_score, f.get('flood', 50), f.get('landslide', 50), 
-#             f.get('soil', 50), past_proximity, f.get('water', 50), 
-#             min(100, f.get('pollution', 50) + (1.5 * year_offset)), past_landuse
-#         ]], dtype=float)
-
-#         score_xgb = float(ML_MODELS['model_xgboost.pkl'].predict(reconstructed_features)[0])
-#         score_rf = float(ML_MODELS['model_rf.pkl'].predict(reconstructed_features)[0])
-#         past_final_score = round((score_xgb + score_rf) / 2, 2)
-
-#         # 🔥 CRITICAL: Backend must use Factor keys (rainfall, proximity, etc.)
-#         # return jsonify({
-#         #     "historical_score": past_final_score,
-#         #     "current_score": current_suitability['suitability_score'],
-#         #     "drift_analysis": {
-#         #         "rainfall": round(past_rainfall_score - f.get('rainfall', 0), 2),
-#         #         "proximity": round(past_proximity - f.get('proximity', 0), 2),
-#         #         "landuse": round(past_landuse - f.get('landuse', 0), 2),
-#         #         "pollution": round(year_offset * 1.5, 2),
-#         #         "flood": 0.0, "landslide": 0.0, "soil": 0.0, "water": 0.0 # Standard placeholders
-#         #     }
-#         # })
-#         # Ensure the drift_analysis dictionary uses these exact keys
-#         return jsonify({
-#             "historical_score": past_final_score,
-#             "current_score": current_suitability['suitability_score'],
-#             "drift_analysis": {
-#                 "rainfall": round(past_rainfall_score - f.get('rainfall', 0), 2),
-#                 "proximity": round(past_proximity - f.get('proximity', 0), 2),
-#                 "landuse": round(past_landuse - f.get('landuse', 0), 2),
-#                 "pollution": round(year_offset * 1.5, 2), # Cleaner air in the past
-#                 "flood": 0.0, "landslide": 0.0, "soil": 0.0, "water": 0.0 # Placeholders
-#             }
-#         })
-#     except Exception as e:
-#         logger.error(f"History Error: {e}")
-#         return jsonify({"error": str(e)}), 500
-# @app.route('/history_analysis', methods=['POST'])
-# def get_history():
-#     data = request.json
-#     try:
-#         lat = float(data.get('latitude'))
-#         lng = float(data.get('longitude'))
-        
-#         # 1. Fetch CURRENT Baseline (One call)
-#         current_suitability = _perform_suitability_analysis(lat, lng)
-#         f = current_suitability['factors']
-        
-#         # 2. Parallel Timeline Generator
-#         # We calculate all timelines at once so the frontend never has to 'sync' again
-#         timelines = ['1M', '1Y', '10Y']
-#         results = {}
-
-#         # Determine Urbanization Rate once
+#         # 2. Determine Urbanization Rate
 #         is_urban = f.get('proximity', 50) > 60
 #         decay_rate = 0.02 if is_urban else 0.005
 
-#         for range_key in timelines:
-#             # Map range to years
-#             years_map = {'1M': 1.0/12.0, '1Y': 1.0, '10Y': 10.0}
-#             offset = years_map[range_key]
-            
-#             # Reversion Math
+#         # 3. Generate ALL Timelines (Matching history_bundle key)
+#         timelines = ['1W', '1M', '1Y', '10Y']
+#         history_bundle = {}
+
+#         for t_key in timelines:
+#             years_map = {'1W': 1.0/52.0, '1M': 1.0/12.0, '1Y': 1.0, '10Y': 10.0}
+#             offset = years_map[t_key]
 #             rev_mult = (1.0 - (decay_rate * offset))
             
-#             # ACCURACY: Calculate ALL Factor Drifts
-#             # 1. Urban Factors
+#             # Reconstruction Logic
 #             p_prox = f.get('proximity', 50) * rev_mult
 #             p_land = min(100, f.get('landuse', 50) / rev_mult)
-            
-#             # 2. Climate Factors (Using your Archive Helper)
-#             p_rain_mm = fetch_historical_weather_stats(lat, lng, int(offset) if offset >= 1 else 1)
-#             p_rain_score = 100 - (p_rain_mm / 10) if p_rain_mm < 800 else 20
-            
-#             # 3. Geo-Safety Factors (Inverted Urban Logic)
-#             # Past had less concrete = better drainage = lower flood risk (higher safety score)
 #             p_flood = min(100, f.get('flood', 50) * (1.0 + (decay_rate * offset * 0.5)))
 #             p_soil = min(100, f.get('soil', 50) * (1.0 + (decay_rate * offset)))
             
-#             # 4. Predict Historical Score
-#             feat = np.array([[p_rain_score, p_flood, f.get('landslide', 50), p_soil, p_prox, f.get('water', 50), f.get('pollution', 50) + (2 * offset), p_land]], dtype=float)
+#             p_rain_mm = fetch_historical_weather_stats(lat, lng, int(offset) if offset >= 1 else 1)
+#             p_rain_score = 100 - (p_rain_mm / 10) if p_rain_mm < 800 else 20
             
+#             # ML Ensemble Sync
+#             feat = np.array([[p_rain_score, p_flood, f.get('landslide', 50), p_soil, p_prox, f.get('water', 50), f.get('pollution', 50) + (2 * offset), p_land]], dtype=float)
 #             p_score = round((float(ML_MODELS['model_xgboost.pkl'].predict(feat)[0]) + float(ML_MODELS['model_rf.pkl'].predict(feat)[0])) / 2, 2)
 
-#             results[range_key] = {
-#                 "historical_score": p_score,
+#             history_bundle[t_key] = {
+#                 "score": p_score,
 #                 "drifts": {
 #                     "rainfall": round(p_rain_score - f.get('rainfall', 0), 2),
 #                     "proximity": round(p_prox - f.get('proximity', 0), 2),
@@ -771,33 +502,126 @@ def fetch_historical_weather_stats(lat, lng, year_offset):
 #                     "flood": round(p_flood - f.get('flood', 0), 2),
 #                     "soil": round(p_soil - f.get('soil', 0), 2),
 #                     "pollution": round(offset * 2.0, 2),
-#                     "water": 0.0, "landslide": 0.0 # Stable geological factors
+#                     "water": 0.0, "landslide": 0.0
 #                 }
 #             }
 
 #         return jsonify({
 #             "current_score": current_suitability['suitability_score'],
-#             "history_data": results, # Contains 1M, 1Y, 10Y
+#             "history_bundle": history_bundle, # Changed from 'history_data' to match Frontend
 #             "status": "success"
 #         })
+#     # except Exception as e:
+#     #     return jsonify({"error": str(e)}), 500
 #     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
-@app.route('/<path:path>', methods=['OPTIONS'])
-def global_options(path):
-    return jsonify({"status": "ok"}), 200
+#         logger.exception("History Analysis Failure")
+#         return jsonify({
+#             "error": "History engine crashed",
+#             "details": str(e)
+#         }), 500
+# @app.route('/history_analysis', methods=['POST','OPTIONS'])
+# def get_history():
+#     # Handle the CORS preflight request from the browser
+#     if request.method == 'OPTIONS':
+#         return jsonify({"status": "ok"}), 200
+#     # data = request.json
+#     # try:
+#     #     lat = float(data.get('latitude'))
+#     #     lng = float(data.get('longitude'))
+#     try:
+#         data = request.get_json(force=True, silent=True)
 
-@app.route('/history_analysis', methods=['POST','OPTIONS'])
+#         if not data:
+#             return jsonify({"error": "No JSON body received"}), 400
+
+#         lat = float(data.get('latitude'))
+#         lng = float(data.get('longitude'))
+
+#         if lat is None or lng is None:
+#             return jsonify({"error": "Missing latitude or longitude"}), 400
+        
+#         # 1. Fetch CURRENT Baseline
+#         current_suitability = _perform_suitability_analysis(lat, lng)
+#         f = current_suitability['factors']
+        
+#         # 2. Determine Urbanization Rate
+#         is_urban = f.get('proximity', 50) > 60
+#         decay_rate = 0.02 if is_urban else 0.005
+
+#         # 3. Generate ALL Timelines (Matching history_bundle key)
+#         timelines = ['1W', '1M', '1Y', '10Y']
+#         history_bundle = {}
+
+#         for t_key in timelines:
+#             years_map = {'1W': 1.0/52.0, '1M': 1.0/12.0, '1Y': 1.0, '10Y': 10.0}
+#             offset = years_map[t_key]
+#             rev_mult = (1.0 - (decay_rate * offset))
+            
+#             # Reconstruction Logic
+#             p_prox = f.get('proximity', 50) * rev_mult
+#             p_land = min(100, f.get('landuse', 50) / rev_mult)
+#             p_flood = min(100, f.get('flood', 50) * (1.0 + (decay_rate * offset * 0.5)))
+#             p_soil = min(100, f.get('soil', 50) * (1.0 + (decay_rate * offset)))
+            
+#             p_rain_mm = fetch_historical_weather_stats(lat, lng, int(offset) if offset >= 1 else 1)
+#             p_rain_score = 100 - (p_rain_mm / 10) if p_rain_mm < 800 else 20
+            
+#             # ML Ensemble Sync
+#             feat = np.array([[p_rain_score, p_flood, f.get('landslide', 50), p_soil, p_prox, f.get('water', 50), f.get('pollution', 50) + (2 * offset), p_land]], dtype=float)
+#             p_score = round((float(ML_MODELS['model_xgboost.pkl'].predict(feat)[0]) + float(ML_MODELS['model_rf.pkl'].predict(feat)[0])) / 2, 2)
+#             if t_key == '10Y':
+#                 # Velocity = (Current - Past) / 10 Years
+#                 prox_velocity = (f.get('proximity', 50) - p_prox) / 10.0
+#                 land_velocity = (p_land - f.get('landuse', 50)) / 10.0
+                
+#                 # Combined Velocity Index (0 to 10 scale for the gauge)
+#                 # Higher values = faster urban 'boom'
+#                 raw_velocity = (prox_velocity + land_velocity) / 2
+#                 velocity_score = min(10, max(0, raw_velocity * 5)) # Scaled for UI
+                
+#                 velocity_label = "Stable"
+#                 if velocity_score > 7: velocity_label = "Hyper-Growth"
+#                 elif velocity_score > 3: velocity_label = "Expanding"
+                
+#                 # Add to the bundle
+#                 history_bundle[t_key]["velocity"] = {
+#                     "score": round(velocity_score, 2),
+#                     "label": velocity_label
+#                 }
+#             history_bundle[t_key] = {
+#                 "score": p_score,
+#                 "drifts": {
+#                     "rainfall": round(p_rain_score - f.get('rainfall', 0), 2),
+#                     "proximity": round(p_prox - f.get('proximity', 0), 2),
+#                     "landuse": round(p_land - f.get('landuse', 0), 2),
+#                     "flood": round(p_flood - f.get('flood', 0), 2),
+#                     "soil": round(p_soil - f.get('soil', 0), 2),
+#                     "pollution": round(offset * 2.0, 2),
+#                     "water": 0.0, "landslide": 0.0
+#                 }
+#             }
+
+#         return jsonify({
+#             "current_score": current_suitability['suitability_score'],
+#             "history_bundle": history_bundle, # Changed from 'history_data' to match Frontend
+#             "status": "success"
+#         })
+#     # except Exception as e:
+#     #     return jsonify({"error": str(e)}), 500
+#     except Exception as e:
+#         logger.exception("History Analysis Failure")
+#         return jsonify({
+#             "error": "History engine crashed",
+#             "details": str(e)
+#         }), 500
+@app.route('/history_analysis', methods=['POST', 'OPTIONS'])
 def get_history():
-    # Handle the CORS preflight request from the browser
+    # Handle the CORS preflight handshake for deployment
     if request.method == 'OPTIONS':
         return jsonify({"status": "ok"}), 200
-    # data = request.json
-    # try:
-    #     lat = float(data.get('latitude'))
-    #     lng = float(data.get('longitude'))
+
     try:
         data = request.get_json(force=True, silent=True)
-
         if not data:
             return jsonify({"error": "No JSON body received"}), 400
 
@@ -807,38 +631,73 @@ def get_history():
         if lat is None or lng is None:
             return jsonify({"error": "Missing latitude or longitude"}), 400
         
-        # 1. Fetch CURRENT Baseline
+        # 1. Fetch CURRENT state baseline
         current_suitability = _perform_suitability_analysis(lat, lng)
         f = current_suitability['factors']
         
-        # 2. Determine Urbanization Rate
+        # 2. Determine Local Urbanization Decay Rate
         is_urban = f.get('proximity', 50) > 60
-        decay_rate = 0.02 if is_urban else 0.005
+        decay_rate = 0.02 if is_urban else 0.005 # Faster reversion for urban hubs
 
-        # 3. Generate ALL Timelines (Matching history_bundle key)
+        # 3. Generate Complete Bundle for Temporal Slider
         timelines = ['1W', '1M', '1Y', '10Y']
         history_bundle = {}
 
         for t_key in timelines:
+            # Map time range to scientific year offsets
             years_map = {'1W': 1.0/52.0, '1M': 1.0/12.0, '1Y': 1.0, '10Y': 10.0}
             offset = years_map[t_key]
+            
+            # Reconstruction Multiplier (Backwards in time logic)
             rev_mult = (1.0 - (decay_rate * offset))
             
-            # Reconstruction Logic
+            # --- FACTOR RECONSTRUCTION ---
             p_prox = f.get('proximity', 50) * rev_mult
-            p_land = min(100, f.get('landuse', 50) / rev_mult)
+            p_land = min(100, f.get('landuse', 50) / rev_mult) # More green in the past
             p_flood = min(100, f.get('flood', 50) * (1.0 + (decay_rate * offset * 0.5)))
             p_soil = min(100, f.get('soil', 50) * (1.0 + (decay_rate * offset)))
             
+            # Fetch actual climate data from archives for that period
             p_rain_mm = fetch_historical_weather_stats(lat, lng, int(offset) if offset >= 1 else 1)
             p_rain_score = 100 - (p_rain_mm / 10) if p_rain_mm < 800 else 20
             
-            # ML Ensemble Sync
-            feat = np.array([[p_rain_score, p_flood, f.get('landslide', 50), p_soil, p_prox, f.get('water', 50), f.get('pollution', 50) + (2 * offset), p_land]], dtype=float)
-            p_score = round((float(ML_MODELS['model_xgboost.pkl'].predict(feat)[0]) + float(ML_MODELS['model_rf.pkl'].predict(feat)[0])) / 2, 2)
+            # --- ML ENSEMBLE PREDICTION ---
+            # Features: [Rain, Flood, Landslide, Soil, Prox, Water, Poll, Landuse]
+            feat = np.array([[
+                p_rain_score, 
+                p_flood, 
+                f.get('landslide', 50), 
+                p_soil, 
+                p_prox, 
+                f.get('water', 50), 
+                f.get('pollution', 50) + (2 * offset), # Air was cleaner in the past
+                p_land
+            ]], dtype=float)
+            
+            p_score = round((float(ML_MODELS['model_xgboost.pkl'].predict(feat)[0]) + 
+                            float(ML_MODELS['model_rf.pkl'].predict(feat)[0])) / 2, 2)
+            
+            # --- URBANIZATION VELOCITY (The Derivative) ---
+            prox_change = f.get('proximity', 50) - p_prox
+            land_change = p_land - f.get('landuse', 50)
+            
+            # Normalize change by time to get the 'Speed of Development'
+            raw_velocity = (prox_change + land_change) / (2 * offset)
+            
+            # Map to 0-10 scale for the UI Gauge
+            velocity_score = min(10, max(0, raw_velocity * 4)) 
+            
+            velocity_label = "Stable"
+            if velocity_score > 7: velocity_label = "Hyper-Growth"
+            elif velocity_score > 3: velocity_label = "Expanding"
 
+            # 4. Construct the Timeline Object (Prevents KeyError)
             history_bundle[t_key] = {
                 "score": p_score,
+                "velocity": {
+                    "score": round(velocity_score, 2),
+                    "label": velocity_label
+                },
                 "drifts": {
                     "rainfall": round(p_rain_score - f.get('rainfall', 0), 2),
                     "proximity": round(p_prox - f.get('proximity', 0), 2),
@@ -846,19 +705,19 @@ def get_history():
                     "flood": round(p_flood - f.get('flood', 0), 2),
                     "soil": round(p_soil - f.get('soil', 0), 2),
                     "pollution": round(offset * 2.0, 2),
-                    "water": 0.0, "landslide": 0.0
+                    "water": 0.0, 
+                    "landslide": 0.0
                 }
             }
 
         return jsonify({
             "current_score": current_suitability['suitability_score'],
-            "history_bundle": history_bundle, # Changed from 'history_data' to match Frontend
+            "history_bundle": history_bundle,
             "status": "success"
         })
-    # except Exception as e:
-    #     return jsonify({"error": str(e)}), 500
+
     except Exception as e:
-        logger.exception("History Analysis Failure")
+        logger.exception("CRITICAL: History Analysis Engine Failure")
         return jsonify({
             "error": "History engine crashed",
             "details": str(e)
