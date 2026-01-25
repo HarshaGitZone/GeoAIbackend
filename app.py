@@ -782,8 +782,11 @@ def fetch_historical_weather_stats(lat, lng, year_offset):
 #         })
 #     except Exception as e:
 #         return jsonify({"error": str(e)}), 500
-@app.route('/history_analysis', methods=['POST'])
+@app.route('/history_analysis', methods=['POST','OPTIONS'])
 def get_history():
+    # Handle the CORS preflight request from the browser
+    if request.method == 'OPTIONS':
+        return jsonify({"status": "ok"}), 200
     data = request.json
     try:
         lat = float(data.get('latitude'))
