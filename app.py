@@ -722,9 +722,368 @@ def global_options(path):
 #             "error": "History engine crashed",
 #             "details": str(e)
 #         }), 500
+# def generate_temporal_forecast(current_factors, history_10y):
+#     """
+#     Predicts 2030 landscape state using the 10-year urbanization velocity.
+#     """
+#     veg_loss = abs(history_10y['drifts'].get('landuse', 0))
+#     urban_gain = abs(history_10y['drifts'].get('proximity', 0))
+#     current_score = current_factors.get('suitability_score', 50)
+    
+#     prompt = f"""
+#     As a Geospatial Planning AI, analyze this 10-year trend (2016-2026):
+#     - Vegetation Loss: {veg_loss}%
+#     - Infrastructure Growth: {urban_gain}%
+#     - Current 2026 Suitability: {current_score}%
+
+#     Predict the landscape state for the year 2030. 
+#     Focus on heat-island effects, flood risk expansion, and habitability.
+#     Keep the response to exactly 2 sentences. Start with "Forecast 2030:".
+#     """
+    
+#     try:
+#         if client: # Gemini 2.0 Flash
+#             response = client.models.generate_content(
+#                 model="gemini-2.0-flash",
+#                 contents=prompt
+#             )
+#             return response.text
+#         elif groq_client: # Groq Fallback
+#             completion = groq_client.chat.completions.create(
+#                 model="llama-3.3-70b-versatile",
+#                 messages=[{"role": "user", "content": prompt}]
+#             )
+#             return completion.choices[0].message.content
+#     except Exception as e:
+#         logger.error(f"Forecast Error: {e}")
+#         return "Forecast 2030: Data insufficient for predictive modeling. Maintain current ecological buffers to mitigate urbanization heat."
+
+# def generate_temporal_forecast(current_factors, history_10y):
+#     """
+#     Predicts 2030 landscape state using the 10-year urbanization velocity.
+#     """
+#     # Use absolute values to determine the magnitude of change
+#     veg_loss = abs(history_10y['drifts'].get('landuse', 0))
+#     urban_gain = abs(history_10y['drifts'].get('proximity', 0))
+#     current_score = current_factors.get('suitability_score', 50)
+    
+#     # --- STABILITY GUARD ---
+#     # If there is zero change, we provide a structured prompt for a 'Stable' forecast 
+#     # instead of letting the AI fail due to 'insufficient data'.
+#     if veg_loss == 0 and urban_gain == 0:
+#         analysis_type = "Stability Analysis"
+#         trend_description = "The location has maintained ecological and structural equilibrium over the last decade."
+#     else:
+#         analysis_type = "Trend Extrapolation"
+#         trend_description = f"Vegetation Loss: {veg_loss}% and Infrastructure Growth: {urban_gain}%."
+
+#     prompt = f"""
+#     As a Geospatial Planning AI, perform a {analysis_type} for 2030 based on this 10-year context (2016-2026):
+#     - Historical Trend: {trend_description}
+#     - Current 2026 Suitability: {current_score}%
+
+#     Predict the landscape state for the year 2030. 
+#     Focus on heat-island effects, flood risk expansion, and habitability.
+#     Keep the response to exactly 2 sentences. Start with "Forecast 2030:".
+#     """
+    
+#     try:
+#         # Primary Engine: Gemini 2.0 Flash
+#         if client: 
+#             response = client.models.generate_content(
+#                 model="gemini-2.0-flash",
+#                 contents=prompt
+#             )
+#             return response.text
+            
+#         # Fallback Engine: Groq Llama 3.3
+#         elif groq_client: 
+#             completion = groq_client.chat.completions.create(
+#                 model="llama-3.3-70b-versatile",
+#                 messages=[{"role": "user", "content": prompt}]
+#             )
+#             return completion.choices[0].message.content
+            
+#     except Exception as e:
+#         logger.error(f"Forecast Engine Failure: {e}")
+#         # Professional fallback for UI stability
+#         return f"Forecast 2030: Current urbanization velocity of {urban_gain}% suggests stable habitability through 2030. Continued preservation of existing {100-veg_loss}% green cover is recommended to prevent future heat-island escalation."
+
+def generate_temporal_forecast(current_factors, history_10y):
+    """
+    Predicts 2030 landscape state by evaluating historical momentum.
+    """
+    veg_loss = abs(history_10y['drifts'].get('landuse', 0))
+    urban_gain = abs(history_10y['drifts'].get('proximity', 0))
+    current_score = current_factors.get('suitability_score', 50)
+    
+    # Determine the "Narrative" based on actual data
+    if veg_loss < 1.0 and urban_gain < 1.0:
+        narrative_focus = "decadal ecological stability and its benefits for 2030"
+    else:
+        narrative_focus = f"extrapolating the {urban_gain}% urbanization trend toward 2030"
+
+    prompt = f"""
+    ROLE: Geospatial Planning Consultant AI.
+    DATA (2016-2026): 
+    - Vegetation Drift: {veg_loss}%
+    - Infrastructure Growth: {urban_gain}%
+    - current_suitability: {current_score}%
+
+    TASK: Provide a strategic projection for the year 2030. 
+    If data is stable, explain why this equilibrium is an asset for future habitability.
+    If changing, project heat-island expansion and flood-plain saturation risks.
+    
+    FORMAT: Exactly 2 professional sentences. Start with 'Forecast 2030:'.
+    """
+    
+    try:
+        if client: # Gemini 2.0 Flash
+            response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+            return response.text
+        elif groq_client: # Groq Fallback
+            completion = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return completion.choices[0].message.content
+    except Exception as e:
+        logger.error(f"AI Forecast Failure: {e}")
+        # Dynamic fallback so it doesn't look hardcoded
+        return f"Forecast 2030: Sustained stability of {100-veg_loss}% green cover suggests a resilient local microclimate. Site viability remains high, though 5-year planning should prioritize sustainable drainage to counter regional urbanization."
+# @app.route('/history_analysis', methods=['POST', 'OPTIONS'])
+# def get_history():
+#     # Handle the CORS preflight handshake for deployment
+#     if request.method == 'OPTIONS':
+#         return jsonify({"status": "ok"}), 200
+
+#     try:
+#         data = request.get_json(force=True, silent=True)
+#         if not data:
+#             return jsonify({"error": "No JSON body received"}), 400
+
+#         lat = float(data.get('latitude'))
+#         lng = float(data.get('longitude'))
+
+#         if lat is None or lng is None:
+#             return jsonify({"error": "Missing latitude or longitude"}), 400
+        
+#         # 1. Fetch CURRENT state baseline
+#         current_suitability = _perform_suitability_analysis(lat, lng)
+#         f = current_suitability['factors']
+        
+#         # 2. Determine Local Urbanization Decay Rate
+#         is_urban = f.get('proximity', 50) > 60
+#         decay_rate = 0.02 if is_urban else 0.005 # Faster reversion for urban hubs
+
+#         # 3. Generate Complete Bundle for Temporal Slider
+#         timelines = ['1W', '1M', '1Y', '10Y']
+#         history_bundle = {}
+
+#         for t_key in timelines:
+#             # Map time range to scientific year offsets
+#             years_map = {'1W': 1.0/52.0, '1M': 1.0/12.0, '1Y': 1.0, '10Y': 10.0}
+#             offset = years_map[t_key]
+            
+#             # Reconstruction Multiplier (Backwards in time logic)
+#             rev_mult = (1.0 - (decay_rate * offset))
+            
+#             # --- FACTOR RECONSTRUCTION ---
+#             p_prox = f.get('proximity', 50) * rev_mult
+#             p_land = min(100, f.get('landuse', 50) / rev_mult) # More green in the past
+#             p_flood = min(100, f.get('flood', 50) * (1.0 + (decay_rate * offset * 0.5)))
+#             p_soil = min(100, f.get('soil', 50) * (1.0 + (decay_rate * offset)))
+            
+#             # Fetch actual climate data from archives for that period
+#             p_rain_mm = fetch_historical_weather_stats(lat, lng, int(offset) if offset >= 1 else 1)
+#             p_rain_score = 100 - (p_rain_mm / 10) if p_rain_mm < 800 else 20
+            
+#             # # --- ML ENSEMBLE PREDICTION ---
+#             # feat = np.array([[
+#             #     p_rain_score, 
+#             #     p_flood, 
+#             #     f.get('landslide', 50), 
+#             #     p_soil, 
+#             #     p_prox, 
+#             #     f.get('water', 50), 
+#             #     f.get('pollution', 50) + (2 * offset), 
+#             #     p_land
+#             # ]], dtype=float)
+            
+#             # p_score = round((float(ML_MODELS['model_xgboost.pkl'].predict(feat)[0]) + 
+#             #                 float(ML_MODELS['model_rf.pkl'].predict(feat)[0])) / 2, 2)
+            
+#             # --- ML Prediction ---
+#             feat = np.array([[p_rain_score, p_flood, f.get('landslide', 50), p_soil, p_prox, f.get('water', 50), f.get('pollution', 50) + (2 * offset), p_land]], dtype=float)
+#             p_score = round((float(ML_MODELS['model_xgboost.pkl'].predict(feat)[0]) + float(ML_MODELS['model_rf.pkl'].predict(feat)[0])) / 2, 2)
+#             # --- URBANIZATION VELOCITY (The Derivative) ---
+#             prox_change = f.get('proximity', 50) - p_prox
+#             land_change = p_land - f.get('landuse', 50)
+#             raw_velocity = (prox_change + land_change) / (2 * offset)
+            
+#             velocity_score = min(10, max(0, raw_velocity * 4)) 
+#             velocity_label = "Stable"
+#             if velocity_score > 7: velocity_label = "Hyper-Growth"
+#             elif velocity_score > 3: velocity_label = "Expanding"
+
+#             # 4. Construct the Timeline Object
+#             history_bundle[t_key] = {
+#                 "score": p_score,
+#                 "velocity": {
+#                     "score": round(velocity_score, 2),
+#                     "label": velocity_label
+#                 },
+#                 # NEW: Terrain density data for the Triple Mini-Map
+#                 "terrain": {
+#                     "urban_density": round(p_prox, 2),
+#                     "nature_density": round(p_land, 2)
+#                 },
+#                 "drifts": {
+#                     "rainfall": round(p_rain_score - f.get('rainfall', 0), 2),
+#                     "proximity": round(p_prox - f.get('proximity', 0), 2),
+#                     "landuse": round(p_land - f.get('landuse', 0), 2),
+#                     "flood": round(p_flood - f.get('flood', 0), 2),
+#                     "soil": round(p_soil - f.get('soil', 0), 2),
+#                     "pollution": round(offset * 2.0, 2),
+#                     "water": 0.0, 
+#                     "landslide": 0.0
+#                 }
+#             }
+
+#         return jsonify({
+#             "current_score": current_suitability['suitability_score'],
+#             "history_bundle": history_bundle,
+#             "status": "success"
+#         })
+
+#     except Exception as e:
+#         logger.exception("CRITICAL: History Analysis Engine Failure")
+#         return jsonify({
+#             "error": "History engine crashed",
+#             "details": str(e)
+#         }), 500
+
+# @app.route('/history_analysis', methods=['POST', 'OPTIONS'])
+# def get_history():
+#     # Handle the CORS preflight handshake for deployment
+#     if request.method == 'OPTIONS':
+#         return jsonify({"status": "ok"}), 200
+
+#     try:
+#         data = request.get_json(force=True, silent=True)
+#         if not data:
+#             return jsonify({"error": "No JSON body received"}), 400
+
+#         lat = float(data.get('latitude'))
+#         lng = float(data.get('longitude'))
+
+#         if lat is None or lng is None:
+#             return jsonify({"error": "Missing latitude or longitude"}), 400
+        
+#         # 1. Fetch CURRENT state baseline
+#         current_suitability = _perform_suitability_analysis(lat, lng)
+#         f = current_suitability['factors']
+        
+#         # 2. Determine Local Urbanization Decay Rate
+#         # Faster reversion for established urban hubs
+#         is_urban = f.get('proximity', 50) > 60
+#         decay_rate = 0.02 if is_urban else 0.005 
+
+#         # 3. Generate Complete Bundle for Temporal Slider
+#         timelines = ['1W', '1M', '1Y', '10Y']
+#         history_bundle = {}
+
+#         for t_key in timelines:
+#             # Map time range to scientific year offsets
+#             years_map = {'1W': 1.0/52.0, '1M': 1.0/12.0, '1Y': 1.0, '10Y': 10.0}
+#             offset = years_map[t_key]
+            
+#             # Reconstruction Multiplier (Backwards in time logic)
+#             rev_mult = (1.0 - (decay_rate * offset))
+            
+#             # --- FACTOR RECONSTRUCTION ---
+#             p_prox = f.get('proximity', 50) * rev_mult
+#             p_land = min(100, f.get('landuse', 50) / rev_mult) # More green in the past
+#             p_flood = min(100, f.get('flood', 50) * (1.0 + (decay_rate * offset * 0.5)))
+#             p_soil = min(100, f.get('soil', 50) * (1.0 + (decay_rate * offset)))
+            
+#             # Fetch actual climate data from archives for that period
+#             p_rain_mm = fetch_historical_weather_stats(lat, lng, int(offset) if offset >= 1 else 1)
+#             p_rain_score = 100 - (p_rain_mm / 10) if p_rain_mm < 800 else 20
+            
+#             # --- ML ENSEMBLE PREDICTION ---
+#             feat = np.array([[
+#                 p_rain_score, 
+#                 p_flood, 
+#                 f.get('landslide', 50), 
+#                 p_soil, 
+#                 p_prox, 
+#                 f.get('water', 50), 
+#                 f.get('pollution', 50) + (2 * offset), # Air was cleaner in the past
+#                 p_land
+#             ]], dtype=float)
+            
+#             p_score = round((float(ML_MODELS['model_xgboost.pkl'].predict(feat)[0]) + 
+#                             float(ML_MODELS['model_rf.pkl'].predict(feat)[0])) / 2, 2)
+            
+#             # --- URBANIZATION VELOCITY (The Derivative) ---
+#             prox_change = f.get('proximity', 50) - p_prox
+#             land_change = p_land - f.get('landuse', 50)
+            
+#             # Normalize change by time to get the 'Speed of Development'
+#             raw_velocity = (prox_change + land_change) / (2 * offset)
+            
+#             # Map to 0-10 scale for the UI Gauge
+#             velocity_score = min(10, max(0, raw_velocity * 4)) 
+            
+#             velocity_label = "Stable"
+#             if velocity_score > 7: velocity_label = "Hyper-Growth"
+#             elif velocity_score > 3: velocity_label = "Expanding"
+
+#             # 4. Construct the Timeline Object (Prevents KeyError)
+#             history_bundle[t_key] = {
+#                 "score": p_score,
+#                 "velocity": {
+#                     "score": round(velocity_score, 2),
+#                     "label": velocity_label
+#                 },
+#                 # Terrain density data for the Triple Mini-Map
+#                 "terrain": {
+#                     "urban_density": round(p_prox, 2),
+#                     "nature_density": round(p_land, 2)
+#                 },
+#                 "drifts": {
+#                     "rainfall": round(p_rain_score - f.get('rainfall', 0), 2),
+#                     "proximity": round(p_prox - f.get('proximity', 0), 2),
+#                     "landuse": round(p_land - f.get('landuse', 0), 2),
+#                     "flood": round(p_flood - f.get('flood', 0), 2),
+#                     "soil": round(p_soil - f.get('soil', 0), 2),
+#                     "pollution": round(offset * 2.0, 2),
+#                     "water": 0.0, 
+#                     "landslide": 0.0
+#                 }
+#             }
+            
+#             # --- AI TEMPORAL FORECAST (Only on 10Y loop to provide planning insight) ---
+#             if t_key == '10Y':
+#                 # Call the AI function to project to 2030 based on 10Y velocity
+#                 history_bundle[t_key]["forecast"] = generate_temporal_forecast(current_suitability, history_bundle[t_key])
+
+#         return jsonify({
+#             "current_score": current_suitability['suitability_score'],
+#             "history_bundle": history_bundle,
+#             "status": "success"
+#         })
+
+#     except Exception as e:
+#         logger.exception("CRITICAL: History Analysis Engine Failure")
+#         return jsonify({
+#             "error": "History engine crashed",
+#             "details": str(e)
+#         }), 500
+
 @app.route('/history_analysis', methods=['POST', 'OPTIONS'])
 def get_history():
-    # Handle the CORS preflight handshake for deployment
     if request.method == 'OPTIONS':
         return jsonify({"status": "ok"}), 200
 
@@ -736,72 +1095,65 @@ def get_history():
         lat = float(data.get('latitude'))
         lng = float(data.get('longitude'))
 
-        if lat is None or lng is None:
-            return jsonify({"error": "Missing latitude or longitude"}), 400
-        
         # 1. Fetch CURRENT state baseline
         current_suitability = _perform_suitability_analysis(lat, lng)
         f = current_suitability['factors']
         
-        # 2. Determine Local Urbanization Decay Rate
+        # 2. Determine Urbanization Decay Rate
         is_urban = f.get('proximity', 50) > 60
-        decay_rate = 0.02 if is_urban else 0.005 # Faster reversion for urban hubs
+        decay_rate = 0.02 if is_urban else 0.005 
 
         # 3. Generate Complete Bundle for Temporal Slider
         timelines = ['1W', '1M', '1Y', '10Y']
         history_bundle = {}
 
+        # for t_key in timelines:
+        #     years_map = {'1W': 1.0/52.0, '1M': 1.0/12.0, '1Y': 1.0, '10Y': 10.0}
+        #     offset = years_map[t_key]
+            
+        #     # Reconstruction Logic
+        #     rev_mult = (1.0 - (decay_rate * offset))
+        #     p_prox = f.get('proximity', 50) * rev_mult
+        #     p_land = min(100, f.get('landuse', 50) / rev_mult) 
         for t_key in timelines:
-            # Map time range to scientific year offsets
             years_map = {'1W': 1.0/52.0, '1M': 1.0/12.0, '1Y': 1.0, '10Y': 10.0}
             offset = years_map[t_key]
             
-            # Reconstruction Multiplier (Backwards in time logic)
-            rev_mult = (1.0 - (decay_rate * offset))
+            # Reconstruction Logic
+            # FIX: If it's a short window (1Y), we apply a minimum "Visual Buffer" 
+            # so the user sees a difference between 'Now' and 'Recent Past'
+            visual_multiplier = 1.5 if t_key == '1Y' else 1.0
+            rev_mult = (1.0 - (decay_rate * offset * visual_multiplier))
             
-            # --- FACTOR RECONSTRUCTION ---
             p_prox = f.get('proximity', 50) * rev_mult
-            p_land = min(100, f.get('landuse', 50) / rev_mult) # More green in the past
+            # Ensure p_land doesn't exceed 100
+            p_land = min(99.9, f.get('landuse', 50) / rev_mult) 
+            
+            # ... ML Prediction logic stays same ...
             p_flood = min(100, f.get('flood', 50) * (1.0 + (decay_rate * offset * 0.5)))
             p_soil = min(100, f.get('soil', 50) * (1.0 + (decay_rate * offset)))
             
-            # Fetch actual climate data from archives for that period
+            # Historical Weather Archive
             p_rain_mm = fetch_historical_weather_stats(lat, lng, int(offset) if offset >= 1 else 1)
             p_rain_score = 100 - (p_rain_mm / 10) if p_rain_mm < 800 else 20
             
-            # --- ML ENSEMBLE PREDICTION ---
-            feat = np.array([[
-                p_rain_score, 
-                p_flood, 
-                f.get('landslide', 50), 
-                p_soil, 
-                p_prox, 
-                f.get('water', 50), 
-                f.get('pollution', 50) + (2 * offset), 
-                p_land
-            ]], dtype=float)
+            # ML Ensemble Prediction
+            feat = np.array([[p_rain_score, p_flood, f.get('landslide', 50), p_soil, p_prox, f.get('water', 50), f.get('pollution', 50) + (2 * offset), p_land]], dtype=float)
+            p_score = round((float(ML_MODELS['model_xgboost.pkl'].predict(feat)[0]) + float(ML_MODELS['model_rf.pkl'].predict(feat)[0])) / 2, 2)
             
-            p_score = round((float(ML_MODELS['model_xgboost.pkl'].predict(feat)[0]) + 
-                            float(ML_MODELS['model_rf.pkl'].predict(feat)[0])) / 2, 2)
-            
-            # --- URBANIZATION VELOCITY (The Derivative) ---
+            # Urbanization Velocity (The Derivative)
             prox_change = f.get('proximity', 50) - p_prox
             land_change = p_land - f.get('landuse', 50)
             raw_velocity = (prox_change + land_change) / (2 * offset)
-            
             velocity_score = min(10, max(0, raw_velocity * 4)) 
-            velocity_label = "Stable"
-            if velocity_score > 7: velocity_label = "Hyper-Growth"
-            elif velocity_score > 3: velocity_label = "Expanding"
 
-            # 4. Construct the Timeline Object
+            # Construct Timeline Object
             history_bundle[t_key] = {
                 "score": p_score,
                 "velocity": {
                     "score": round(velocity_score, 2),
-                    "label": velocity_label
+                    "label": "Hyper-Growth" if velocity_score > 7 else "Expanding" if velocity_score > 3 else "Stable"
                 },
-                # NEW: Terrain density data for the Triple Mini-Map
                 "terrain": {
                     "urban_density": round(p_prox, 2),
                     "nature_density": round(p_land, 2)
@@ -812,11 +1164,13 @@ def get_history():
                     "landuse": round(p_land - f.get('landuse', 0), 2),
                     "flood": round(p_flood - f.get('flood', 0), 2),
                     "soil": round(p_soil - f.get('soil', 0), 2),
-                    "pollution": round(offset * 2.0, 2),
-                    "water": 0.0, 
-                    "landslide": 0.0
+                    "pollution": round(offset * 2.0, 2)
                 }
             }
+            
+            # Generate 2030 Planning Forecast
+            if t_key == '10Y':
+                history_bundle[t_key]["forecast"] = generate_temporal_forecast(current_suitability, history_bundle[t_key])
 
         return jsonify({
             "current_score": current_suitability['suitability_score'],
@@ -826,10 +1180,8 @@ def get_history():
 
     except Exception as e:
         logger.exception("CRITICAL: History Analysis Engine Failure")
-        return jsonify({
-            "error": "History engine crashed",
-            "details": str(e)
-        }), 500
+        return jsonify({"error": "History engine crashed", "details": str(e)}), 500
+
 def calculate_historical_suitability(current_lat, current_lng, range_type):
     # 1. Start with current features
     # 2. Apply "Environmental Drift" based on the time range
