@@ -437,148 +437,6 @@ def fetch_historical_weather_stats(lat, lng, year_offset):
         logger.error(f"Historical Weather Error: {e}")
         return 150.0
 
-# def generate_strategic_intelligence(factors, current_score):
-#     """
-#     Generates site-specific intelligence by simulating 
-#     environmental and urban stressors over a 10-year horizon.
-#     """
-#     # 1. AI Future Projection (Temporal Suitability Drift)
-#     # Urbanization impact is calculated by the inverse of proximity and landuse
-#     urban_sprawl_risk = (100 - factors.get('landuse', 50)) * 0.25 
-#     # Vegetation loss is projected based on current soil and rainfall health
-#     veg_drift = -( (factors.get('soil', 50) + factors.get('rainfall', 50)) / 20 )
-    
-#     # Expected score in 2035 (10-year drift)
-#     # Logic: Score drops faster if pollution is already high or safety scores are low
-#     drift_factor = 0.95 if current_score > 70 else 0.88
-#     expected_2035_score = round(current_score * drift_factor, 1)
-
-#     # 2. Improvement Roadmap (Prescriptive Analytics)
-#     # Tasks are only generated if the specific factor is below a 'Prime' threshold
-#     roadmap = []
-#     if factors.get('flood', 100) < 65:
-#         roadmap.append({
-#             "task": "Hydrological Buffering", 
-#             "impact": f"+{round((100 - factors['flood'])*0.4, 1)}%", 
-#             "note": "Install permeable paving and retention basins."
-#         })
-#     if factors.get('soil', 100) < 60:
-#         roadmap.append({
-#             "task": "Lithospheric Stabilization", 
-#             "impact": f"+{round((100 - factors['soil'])*0.3, 1)}%", 
-#             "note": "Bioremediation and organic nutrient cycling."
-#         })
-
-#     # 3. Suggestible Interventions (Preventative)
-#     # Tailored to the site's weakest links
-#     interventions = []
-#     if factors.get('pollution', 100) < 50:
-#         interventions.append("Deploy active air-filtration green walls to counter urban smog.")
-#     if factors.get('water', 100) < 60:
-#         interventions.append("Establish localized greywater recycling to offset projected scarcity.")
-#     if not interventions:
-#         interventions.append("Implement strict zoning to preserve current high-grade status.")
-
-#     return {
-#         "expected_score": expected_2035_score,
-#         "metrics": {
-#             "urban_sprawl": f"+{round(urban_sprawl_risk, 1)}%",
-#             "veg_loss": f"{round(veg_drift, 1)}%"
-#         },
-#         "roadmap": roadmap,
-#         "interventions": interventions
-#     }
-# def generate_strategic_intelligence(factors, current_score):
-#     """
-#     Calculates prescriptive insights and temporal drift 
-#     based on real-time suitability factors.
-#     """
-#     # 1. AI Future Projection (Temporal Suitability Drift)
-#     # Projects score 10 years ahead based on environmental stressors
-#     urban_impact = (100 - factors.get('landuse', 50)) * 0.25 
-#     veg_loss = -((factors.get('soil', 50) + factors.get('rainfall', 50)) / 20)
-    
-#     # Simulate score decay based on current vulnerabilities
-#     drift_rate = 0.92 if current_score > 70 else 0.85
-#     expected_2036_score = round(current_score * drift_rate, 1)
-
-#     # 2. Improvement Roadmap (Prescriptive Analytics)
-#     roadmap = []
-#     if factors.get('flood', 100) < 65:
-#         roadmap.append({
-#             "task": "Hydrological Buffering", 
-#             "impact": f"+{round((100 - factors['flood'])*0.4, 1)}%", 
-#             "note": "Install retention basins and permeable paving."
-#         })
-#     if factors.get('soil', 100) < 60:
-#         roadmap.append({
-#             "task": "Lithospheric Stabilization", 
-#             "impact": f"+{round((100 - factors['soil'])*0.3, 1)}%", 
-#             "note": "Implement organic nutrient cycling and bioremediation."
-#         })
-
-#     # 3. Suggestible Interventions (Preventative)
-#     interventions = []
-#     if factors.get('pollution', 100) < 50:
-#         interventions.append("Deploy active air-filtration green walls to counter urban smog.")
-#     if factors.get('water', 100) < 60:
-#         interventions.append("Establish greywater recycling to offset projected scarcity.")
-    
-#     return {
-#         "expected_score": expected_2036_score,
-#         "metrics": {
-#             "urban_sprawl": f"+{round(urban_impact, 1)}%",
-#             "veg_loss": f"{round(veg_loss, 1)}%"
-#         },
-#         "roadmap": roadmap,
-#         "interventions": interventions if interventions else ["Zoning protection"]
-#     }
-# def generate_strategic_intelligence(factors, current_score, nearby_places):
-#     """
-#     Calculates prescriptive insights and temporal drift based on 
-#     real-time suitability factors and infrastructure proximity.
-#     """
-#     # 1. AI Future Projection (Temporal Suitability Drift)
-#     # Projections are based on current landuse and urban stressors.
-#     urban_impact = (100 - factors.get('landuse', 50)) * 0.25 
-#     veg_loss = -((factors.get('soil', 50) + factors.get('rainfall', 50)) / 20)
-    
-#     # 10-year score decay simulation based on current vulnerabilities.
-#     drift_rate = 0.92 if current_score > 70 else 0.85
-#     expected_2036_score = round(current_score * drift_rate, 1)
-
-#     # 2. Improvement Roadmap (Prescriptive Analytics)
-#     # Tasks are generated dynamically based on low factor scores.
-#     roadmap = []
-#     if factors.get('flood', 100) < 65:
-#         roadmap.append({
-#             "task": "Hydrological Buffering", 
-#             "impact": f"+{round((100 - factors['flood'])*0.4, 1)}%", 
-#             "note": "Install retention basins and permeable paving."
-#         })
-#     if factors.get('soil', 100) < 60:
-#         roadmap.append({
-#             "task": "Lithospheric Stabilization", 
-#             "impact": f"+{round((100 - factors['soil'])*0.3, 1)}%", 
-#             "note": "Implement organic nutrient cycling and bioremediation."
-#         })
-
-#     # 3. Suggestible Interventions (Preventative)
-#     interventions = []
-#     if factors.get('pollution', 100) < 50:
-#         interventions.append("Deploy active air-filtration green walls to counter urban smog.")
-#     if factors.get('water', 100) < 60:
-#         interventions.append("Establish greywater recycling to offset projected scarcity.")
-    
-#     return {
-#         "expected_score": expected_2036_score,
-#         "metrics": {
-#             "urban_sprawl": f"+{round(urban_impact, 1)}%",
-#             "veg_loss": f"{round(veg_loss, 1)}%"
-#         },
-#         "roadmap": roadmap,
-#         "interventions": interventions if interventions else ["Maintain zoning protection"]
-#     }
 def generate_strategic_intelligence(factors, current_score, nearby_list):
     """
     Synthesizes real-time factor drift and infrastructure proximity.
@@ -624,49 +482,6 @@ def generate_strategic_intelligence(factors, current_score, nearby_list):
 def global_options(path):
     return jsonify({"status": "ok"}), 200
 
-
-# def generate_temporal_forecast(current_factors, history_10y):
-#     """
-#     Predicts 2030 landscape state by evaluating historical momentum.
-#     """
-#     veg_loss = abs(history_10y['drifts'].get('landuse', 0))
-#     urban_gain = abs(history_10y['drifts'].get('proximity', 0))
-#     current_score = current_factors.get('suitability_score', 50)
-    
-#     # Determine the "Narrative" based on actual data
-#     if veg_loss < 1.0 and urban_gain < 1.0:
-#         narrative_focus = "decadal ecological stability and its benefits for 2030"
-#     else:
-#         narrative_focus = f"extrapolating the {urban_gain}% urbanization trend toward 2030"
-
-#     prompt = f"""
-#     ROLE: Geospatial Planning Consultant AI.
-#     DATA (2016-2026): 
-#     - Vegetation Drift: {veg_loss}%
-#     - Infrastructure Growth: {urban_gain}%
-#     - current_suitability: {current_score}%
-
-#     TASK: Provide a strategic projection for the year 2030. 
-#     If data is stable, explain why this equilibrium is an asset for future habitability.
-#     If changing, project heat-island expansion and flood-plain saturation risks.
-    
-#     FORMAT: Exactly 2 professional sentences. Start with 'Forecast 2030:'.
-#     """
-    
-#     try:
-#         if client: # Gemini 2.0 Flash
-#             response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-#             return response.text
-#         elif groq_client: # Groq Fallback
-#             completion = groq_client.chat.completions.create(
-#                 model="llama-3.3-70b-versatile",
-#                 messages=[{"role": "user", "content": prompt}]
-#             )
-#             return completion.choices[0].message.content
-#     except Exception as e:
-#         logger.error(f"AI Forecast Failure: {e}")
-#         # Dynamic fallback so it doesn't look hardcoded
-#         return f"Forecast 2030: Sustained stability of {100-veg_loss}% green cover suggests a resilient local microclimate. Site viability remains high, though 5-year planning should prioritize sustainable drainage to counter regional urbanization."
 
 def generate_temporal_forecast(current_factors, history_10y):
     """
@@ -880,7 +695,7 @@ def calculate_historical_suitability(current_lat, current_lng, range_type):
 
     # 3. Modify your input features (e.g., higher vegetation in the past)
     # This is a simplified example of how you'd tweak the input array for XGBoost
-    historical_features = get_features(current_lat, current_lng) # your existing function
+    # historical_features = get_features(current_lat, current_lng) # your existing function
     
     # Example: Simulating more vegetation/less urban sprawl in the past
     # historical_features['landuse'] += multiplier 
@@ -890,48 +705,7 @@ def calculate_historical_suitability(current_lat, current_lng, range_type):
     
     # For now, we simulate the drift on the scores directly for the UI
     return multiplier * 100
-# @app.route('/history_analysis', methods=['POST'])
-# def get_history():
-#     # if request.method == "OPTIONS":
-#     #     return jsonify({"status": "ok"}), 200
-#     data = request.json
-#     lat = data.get('latitude')
-#     lng = data.get('longitude')
-#     range_type = data.get('range', '10Y')
 
-#     # 1. Define Environmental Drift Coefficients per time range
-#     # These represent the scientific "rate of change" for the area
-#     drift_map = {
-#         '1W': 0.005,  # 0.5% change
-#         '1M': 0.02,   # 2% change
-#         '1Y': 0.08,   # 8% change
-#         '10Y': 0.25   # 25% change (Major historical drift)
-#     }
-    
-#     multiplier = drift_map.get(range_type, 0.1)
-
-#     # 2. Factor Logic: We determine which factors were higher or lower in the past
-#     # Vegetation (Landuse) and Rainfall were generally HIGHER 10 years ago.
-#     # Pollution and Urban Flood risk were generally LOWER 10 years ago.
-#     try:
-#         # We return the "Drift" values which the frontend will use to 
-#         # offset the current real-time data from your XGBoost model.
-#         history_response = {
-#             "rainfall_drift": multiplier * 1.2,   # Historically wetter
-#             "flood_drift": -multiplier * 0.8,     # Historically safer
-#             "landslide_drift": multiplier * 0.2,  # Slopes were slightly different
-#             "soil_drift": multiplier * 0.5,       # Soil was richer/less depleted
-#             "landuse_drift": multiplier * 1.5,    # MUCH more vegetation in the past
-#             "water_drift": multiplier * 0.6,      # Water bodies were larger
-#             "pollution_drift": -multiplier * 1.1, # Historically cleaner
-#             "proximity_drift": 0                  # Distance to roads usually stable
-#         }
-        
-#         return jsonify(history_response)
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
-    
-# # --- 2. Suitability Analysis Route ---
 @app.route('/suitability', methods=['POST'])
 def suitability():
     try:
@@ -941,9 +715,30 @@ def suitability():
 
         # CHECK CACHE FIRST - Ensure identical results for same location
         cache_key = get_cache_key(latitude, longitude)
+        # if cache_key in ANALYSIS_CACHE:
+        #     logger.info(f"Returning cached result for {cache_key}")
+        #     return jsonify(ANALYSIS_CACHE[cache_key])
         if cache_key in ANALYSIS_CACHE:
+            cached = ANALYSIS_CACHE[cache_key]
+
+            # 🔥 BACKWARD-COMPATIBILITY FIX
+            if "nearby" not in cached:
+                nearby_list = nearby_places.get_nearby_named_places(latitude, longitude)
+                cached["nearby"] = { "places": nearby_list }
+
             logger.info(f"Returning cached result for {cache_key}")
-            return jsonify(ANALYSIS_CACHE[cache_key])
+            return jsonify(cached)
+        # if cache_key in ANALYSIS_CACHE:
+        #     cached = ANALYSIS_CACHE[cache_key]
+
+        #     # 🔥 FORCE nearby recomputation if empty
+        #     if not cached.get("nearby", {}).get("places"):
+        #         nearby_list = get_nearby_named_places(lat, lon)
+        #         cached["nearby"] = { "places": nearby_list }
+
+        #     return jsonify(cached)
+
+
 
         # PROCEED WITH ANALYSIS AND CACHE THE RESULT
         result = _perform_suitability_analysis(latitude, longitude)
@@ -1226,51 +1021,6 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S IST"),
             "location": {"latitude": latitude, "longitude": longitude}
         }
-
-# @app.route("/generate_report", methods=["POST"])
-# def generate_report():
-#     try:
-#         data = request.json
-#         if not data:
-#             return jsonify({"error": "No data received"}), 400
-        
-#         # 1. Prepare Site A Intelligence
-#         loc_a = data.get("location")
-#         if loc_a:
-#             try:
-#                 places_a = get_nearby_named_places(loc_a.get("latitude"), loc_a.get("longitude"))
-#                 data["nearby_places"] = {"places": places_a}
-#             except:
-#                 data["nearby_places"] = {"places": []}
-
-#         # 2. Prepare Site B Intelligence (if provided)
-#         compare_data = data.get("compareData")
-#         if compare_data:
-#             loc_b = compare_data.get("location")
-#             if loc_b:
-#                 try:
-#                     places_b = get_nearby_named_places(loc_b.get("latitude"), loc_b.get("longitude"))
-#                     data["compareData"]["nearby_places"] = {"places": places_b}
-#                 except:
-#                     data["compareData"]["nearby_places"] = {"places": []}
-
-#         # 3. Generate PDF Buffer using the helper-based pdf_generator
-#         pdf_buffer = generate_land_report(data)
-#         pdf_buffer.seek(0)
-
-#         # 4. Generate dynamic filename for the browser
-#         location_name = data.get("locationName", "Analysis")
-#         clean_name = str(location_name).replace(" ", "_")
-
-#         return send_file(
-#             pdf_buffer,
-#             as_attachment=True,
-#             download_name=f"GeoAI_{clean_name}.pdf",
-#             mimetype="application/pdf"
-#         )
-#     except Exception as e:
-#         logger.exception("Internal PDF Generation Error")
-#         return jsonify({"error": str(e)}), 500
 
 @app.route("/generate_report", methods=["POST", "OPTIONS"])
 def generate_report():
