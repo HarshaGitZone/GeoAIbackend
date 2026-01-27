@@ -1,3 +1,28 @@
+
+import torch
+from torchvision import models, transforms
+from PIL import Image
+import requests
+from io import BytesIO
+
+# Initialize CNN Model (MobileNetV2 is best for web backends)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+cnn_model = models.mobilenet_v2(weights="DEFAULT")
+cnn_model.classifier[1] = torch.nn.Linear(cnn_model.last_channel, 5)
+cnn_model.to(device)
+cnn_model.eval()
+
+# 2. Image Prep
+preprocess = transforms.Compose([
+    transforms.Resize(224),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+
+LAND_CLASSES = ["Urban", "Forest", "Agriculture", "Water", "Industrial"]
+
+
+
 import os
 import sys
 import requests
@@ -187,7 +212,47 @@ def get_live_weather(lat, lng):
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "healthy"}), 200
+def get_cnn_classification(lat, lng):
+    try:
+        import math
+        # 1. Calculate Web Mercator Tile Coordinates (Zoom 18)
+        zoom = 18
+        n = 2.0 ** zoom
+        xtile = int((lng + 180.0) / 360.0 * n)
+        # Clamp latitude to Web Mercator limits
+        lat_clamped = max(min(lat, 85.0511), -85.0511)
+        lat_rad = math.radians(lat_clamped)
+        ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
 
+        # 2. Construct Correct EOX Sentinel-2 URL
+        tile_url = f"https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{zoom}/{ytile}/{xtile}.jpg"
+        
+        # 3. Fetch with User-Agent
+        headers = {"User-Agent": "GeoAI-Client/1.0"}
+        response = requests.get(tile_url, headers=headers, timeout=5)
+        response.raise_for_status()
+
+        img = Image.open(BytesIO(response.content)).convert('RGB')
+        
+        # Run CNN
+        input_tensor = preprocess(img).unsqueeze(0)
+        input_tensor = input_tensor.to(device)
+        
+        with torch.no_grad():
+            output = cnn_model(input_tensor)
+            probabilities = torch.nn.functional.softmax(output[0], dim=0)
+            conf, index = torch.max(probabilities, 0)
+        
+        conf_val = round(conf.item() * 100, 1)
+        return {
+            "class": LAND_CLASSES[index.item()],
+            "confidence": conf_val,
+            "confidence_display": f"{conf_val}%", # Pre-formatted for easy UI display
+            "image_sample": tile_url 
+        }
+    except Exception as e:
+        logger.error(f"CNN Classification Failed: {e}")
+        return {"class": "Unknown", "confidence": 0, "confidence_display": "N/A", "image_sample": None, "error": str(e)}
 
 @app.route('/ask_geogpt', methods=['POST'])
 def ask_geogpt():
@@ -715,33 +780,30 @@ def suitability():
 
         # CHECK CACHE FIRST - Ensure identical results for same location
         cache_key = get_cache_key(latitude, longitude)
-        # if cache_key in ANALYSIS_CACHE:
-        #     logger.info(f"Returning cached result for {cache_key}")
-        #     return jsonify(ANALYSIS_CACHE[cache_key])
+        cnn_analysis = get_cnn_classification(latitude, longitude)
         if cache_key in ANALYSIS_CACHE:
-            cached = ANALYSIS_CACHE[cache_key]
+            result = ANALYSIS_CACHE[cache_key]
+            result['cnn_analysis'] = cnn_analysis # Ensure CNN is always fresh
+            return jsonify(result)
+       
+        
 
-            # 🔥 BACKWARD-COMPATIBILITY FIX
-            if "nearby" not in cached:
-                nearby_list = nearby_places.get_nearby_named_places(latitude, longitude)
-                cached["nearby"] = { "places": nearby_list }
-
-            logger.info(f"Returning cached result for {cache_key}")
-            return jsonify(cached)
-        # if cache_key in ANALYSIS_CACHE:
-        #     cached = ANALYSIS_CACHE[cache_key]
-
-        #     # 🔥 FORCE nearby recomputation if empty
-        #     if not cached.get("nearby", {}).get("places"):
-        #         nearby_list = get_nearby_named_places(lat, lon)
-        #         cached["nearby"] = { "places": nearby_list }
-
-        #     return jsonify(cached)
-
-
-
-        # PROCEED WITH ANALYSIS AND CACHE THE RESULT
+        # 2. Run your Standard Suitability Analysis
         result = _perform_suitability_analysis(latitude, longitude)
+        
+        # 3. Inject CNN data into the result bundle
+        result['cnn_analysis'] = cnn_analysis
+
+        # 4. (Bonus) Use CNN to adjust the score
+        # If CNN sees 'Water', we force landuse factor to 0
+        # if cnn_analysis['class'] == "Water":
+        #     result['factors']['landuse'] = 5.0
+        #     result['suitability_score'] = min(result['suitability_score'], 20.0)
+        #     result['label'] = "Not Suitable (Waterbody Detected)"
+        # 4. Optional: Logic adjustment based on CNN
+        if cnn_analysis.get('class') == "Water":
+             result['suitability_score'] = 5.0
+             result['label'] = "Not Suitable (Waterbody Detected)"
 
     
         # NEW: Fetch nearby places during analysis to provide intelligence context
@@ -766,7 +828,15 @@ def suitability():
         return jsonify({"error": str(e)}), 500
 
 def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
-
+        # --- INITIALIZE ALL FACTORS TO PREVENT CRASHES ---
+        landuse_s = 50.0
+        flood_s = 50.0
+        poll_s = 50.0
+        rainfall_score = 50.0
+        soil_s = 50.0
+        prox_s = 50.0
+        water_s = 50.0
+        landslide_s = 50.0
         # 1. WATER EARLY EXIT
         w_score, w_dist, w_meta = estimate_water_proximity_score(latitude, longitude)
         w_score = round(w_score, 2) if w_score else 0.0
@@ -1114,18 +1184,3 @@ def nearby_places_route():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(debug=False, host="0.0.0.0", port=port, threaded=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
