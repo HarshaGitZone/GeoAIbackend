@@ -18,16 +18,22 @@ def get_nearby_named_places(lat, lon, radius=5000):
     query = f"""
     [out:json];
     (
-    #   node["amenity"~"school|hospital|college"](around:{radius},{lat},{lon});
-    #   way["amenity"~"school|hospital|college"](around:{radius},{lat},{lon});
-     node["amenity"~"school|hospital|college|university"](around:{radius},{lat},{lon});
-      way["amenity"~"school|hospital|college|university"](around:{radius},{lat},{lon});
+      node["amenity"~"school|hospital|college|university|clinic|doctors"](around:{radius},{lat},{lon});
+      way["amenity"~"school|hospital|college|university|clinic|doctors"](around:{radius},{lat},{lon});
 
-      node["shop"~"supermarket|mall|convenience"](around:{radius},{lat},{lon});
-      way["shop"~"supermarket|mall|convenience"](around:{radius},{lat},{lon});
+      node["shop"~"supermarket|mall|convenience|grocery|department_store"](around:{radius},{lat},{lon});
+      way["shop"~"supermarket|mall|convenience|grocery|department_store"](around:{radius},{lat},{lon});
+
+      node["amenity"="fuel"](around:{radius},{lat},{lon});
+      way["amenity"="fuel"](around:{radius},{lat},{lon});
+
+      node["amenity"~"market|marketplace"](around:{radius},{lat},{lon});
+      way["amenity"~"market|marketplace"](around:{radius},{lat},{lon});
 
       node["highway"="bus_stop"](around:{radius},{lat},{lon});
       node["railway"~"station|subway_entrance"](around:{radius},{lat},{lon});
+
+      node["place"~"city|town|village"](around:{radius},{lat},{lon});
     );
     out center tags;
     """
@@ -74,8 +80,14 @@ def get_nearby_named_places(lat, lon, radius=5000):
             place_type = "hospital"
         elif tags.get("amenity") in ["college", "university"]:
             place_type = "college"
-        elif tags.get("shop") in ["supermarket", "mall", "convenience"]:
+        elif tags.get("amenity") == "fuel":
+            place_type = "petrol_bunk"
+        elif tags.get("amenity") in ["market", "marketplace"]:
             place_type = "market"
+        elif tags.get("shop") in ["supermarket", "mall", "convenience", "grocery", "department_store"]:
+            place_type = "market"
+        elif tags.get("place") in ["city", "town", "village"]:
+            place_type = "access_city"
         elif tags.get("highway") == "bus_stop":
             place_type = "transit"
         elif tags.get("railway") in ["station", "subway_entrance"]:

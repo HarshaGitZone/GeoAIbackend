@@ -157,6 +157,11 @@ def train_and_report(samples=10000, test_size=0.2, seed=42):
 
     print("Generating Indian-location synthetic dataset (14 factors, same as app)...")
     X, y = generate_indian_dataset_14(n_samples=samples, seed=seed)
+    
+    # Convert to numpy arrays to avoid feature name warnings
+    X = np.asarray(X, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=seed)
     print(f"  Factors: {FACTOR_ORDER}")
     print(f"  Train: {len(X_train)}  Test: {len(X_test)}\n")
@@ -194,6 +199,11 @@ def report_accuracy_only(test_samples=2000, seed=123):
 
     print("Generating holdout test set (14 factors)...")
     X_test, y_test = generate_indian_dataset_14(n_samples=test_samples, seed=seed)
+    
+    # Convert to numpy arrays to avoid feature name warnings
+    X_test = np.asarray(X_test, dtype=np.float64)
+    y_test = np.asarray(y_test, dtype=np.float64)
+    
     print(f"  Test samples: {len(X_test)}\n")
 
     results = []

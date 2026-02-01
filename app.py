@@ -182,7 +182,7 @@ def _ml_14feature_vector(flat_factors):
         if v is None and k == "infrastructure":
             v = flat_factors.get("proximity")
         vals.append(float(v) if v is not None else 50.0)
-    return pd.DataFrame([vals], columns=ML_FACTOR_ORDER)
+    return np.array([vals], dtype=np.float64)
 
 
 def _predict_suitability_ml(flat_factors):
