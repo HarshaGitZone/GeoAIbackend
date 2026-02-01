@@ -27,7 +27,7 @@ def estimate_flood_risk_score(latitude: float, longitude: float) -> Optional[flo
     
     # 2. GET RAINFALL DATA: Critical for realistic flood assessment
     try:
-        from backend.integrations.rainfall_adapter import _fetch_open_meteo_sum
+        from integrations.rainfall_adapter import _fetch_open_meteo_sum
         rain_mm_60d = _fetch_open_meteo_sum(latitude, longitude, 60)
     except Exception:
         rain_mm_60d = None
