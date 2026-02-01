@@ -45,6 +45,7 @@ log.setLevel(logging.ERROR)
 
 from geogpt_config import generate_system_prompt 
 from reports.pdf_generator import generate_land_report
+from integrations.digital_twin import calculate_development_impact
 from integrations.nearby_places import get_nearby_named_places
 from integrations.terrain_adapter import estimate_terrain_slope
 
@@ -1382,52 +1383,118 @@ def suitability():
         # 4. ALIGN CLASSIFICATION (Updated for 15-Factor Nested Structure)
         # Use vegetation + landuse + infra + pollution so Visual Intelligence matches factor scores
         f = result['factors']
-        infra_score = f['socio_econ']['infrastructure']['value']
-        landuse_score = f['socio_econ']['landuse']['value']
-        poll_score = f['environmental']['pollution']['value']
-        vegetation_score = f['environmental']['vegetation']['value']
-        slope_score = f['physical']['slope']['value']
-        water_score = f['hydrology']['water']['value']
-
-        # Intelligence-based Labeling (consistent with factor scores; no hardcoded Agriculture when veg is low)
-        if result.get("label") == "Not Suitable (Water Body)" or (result.get("label") or "").startswith("Not Suitable (Water"):
-            inferred_class = "Water"
-            conf = 99.9
-        elif result.get("label") == "Not Suitable (Protected/Forest Area)" or (result.get("label") or "").startswith("Not Suitable (Protected"):
+        
+        # Enhanced 15-factor cross-check for more accurate land classification
+        vegetation_score = f.get('vegetation', {}).get('score', 50)
+        landuse_score = f.get('landuse', {}).get('score', 50)
+        infra_score = f.get('infrastructure', {}).get('score', 50)
+        poll_score = f.get('pollution', {}).get('score', 50)
+        slope_score = f.get('slope', {}).get('score', 50)
+        water_score = f.get('water', {}).get('score', 50)
+        flood_score = f.get('flood', {}).get('score', 50)
+        drainage_score = f.get('drainage', {}).get('score', 50)
+        soil_score = f.get('soil', {}).get('score', 50)
+        rainfall_score = f.get('rainfall', {}).get('score', 50)
+        thermal_score = f.get('thermal', {}).get('score', 50)
+        pop_score = f.get('population', {}).get('score', 50)
+        
+        # Sophisticated multi-factor classification logic
+        inferred_class = "Mixed land use"
+        conf = 70.0
+        reasoning = []
+        
+        # Urban/Commercial detection (high infrastructure + low vegetation + high population)
+        if infra_score > 75 and vegetation_score < 40 and pop_score > 60:
+            inferred_class = "Urban/Commercial"
+            conf = 88.0 + (infra_score - 75) * 0.4
+            reasoning.append(f"High infrastructure ({infra_score:.0f}) + low vegetation ({vegetation_score:.0f}) + high population ({pop_score:.0f})")
+        # Industrial detection (high pollution + moderate infrastructure + low vegetation)
+        elif poll_score > 70 and infra_score > 60 and vegetation_score < 35:
+            inferred_class = "Industrial"
+            conf = 92.0 + (poll_score - 70) * 0.3
+            reasoning.append(f"High pollution ({poll_score:.0f}) + moderate infrastructure ({infra_score:.0f}) + low vegetation ({vegetation_score:.0f})")
+        # Dense Urban detection (very high infrastructure + very high population)
+        elif infra_score > 85 and pop_score > 80:
+            inferred_class = "Dense Urban"
+            conf = 90.0 + min(8, (infra_score + pop_score - 165) * 0.2)
+            reasoning.append(f"Very high infrastructure ({infra_score:.0f}) + very high population ({pop_score:.0f})")
+        # Residential/Suburban detection (moderate infrastructure + moderate population + some vegetation)
+        elif 60 < infra_score < 85 and 50 < pop_score < 80 and 30 < vegetation_score < 60:
+            inferred_class = "Residential/Suburban"
+            conf = 80.0 + min(10, (infra_score + pop_score) / 20)
+            reasoning.append(f"Moderate infrastructure ({infra_score:.0f}) + population ({pop_score:.0f}) + vegetation ({vegetation_score:.0f})")
+        # Forest detection (high vegetation + low infrastructure + low pollution)
+        elif vegetation_score > 75 and infra_score < 40 and poll_score < 45:
             inferred_class = "Forest"
-            conf = 98.5
+            conf = 90.0 + (vegetation_score - 75) * 0.4
+            reasoning.append(f"High vegetation ({vegetation_score:.0f}) + low infrastructure ({infra_score:.0f}) + low pollution ({poll_score:.0f})")
+        # Agriculture detection (moderate-high vegetation + moderate landuse + good soil)
+        elif vegetation_score > 55 and landuse_score > 50 and soil_score > 60 and 40 < infra_score < 70:
+            inferred_class = "Agriculture"
+            conf = 82.0 + min(8, (vegetation_score + soil_score) / 25)
+            reasoning.append(f"Good vegetation ({vegetation_score:.0f}) + landuse ({landuse_score:.0f}) + soil ({soil_score:.0f})")
+        # Water/Wetland detection (high water + high drainage + low slope)
+        elif water_score > 70 and drainage_score > 70 and slope_score < 40:
+            inferred_class = "Water/Wetland"
+            conf = 88.0 + (water_score - 70) * 0.4
+            reasoning.append(f"High water ({water_score:.0f}) + drainage ({drainage_score:.0f}) + low slope ({slope_score:.0f})")
+        # Mountainous/Hilly detection (high slope + moderate vegetation + low infrastructure)
+        elif slope_score > 70 and infra_score < 50 and vegetation_score > 45:
+            inferred_class = "Mountainous/Hilly"
+            conf = 85.0 + (slope_score - 70) * 0.3
+            reasoning.append(f"High slope ({slope_score:.0f}) + low infrastructure ({infra_score:.0f}) + vegetation ({vegetation_score:.0f})")
+        # Desert/Arid detection (low vegetation + low rainfall + high thermal)
+        elif vegetation_score < 30 and rainfall_score < 40 and thermal_score > 70:
+            inferred_class = "Desert/Arid"
+            conf = 87.0 + (thermal_score - 70) * 0.3
+            reasoning.append(f"Low vegetation ({vegetation_score:.0f}) + low rainfall ({rainfall_score:.0f}) + high thermal ({thermal_score:.0f})")
+        # Coastal detection (moderate water + moderate drainage + low elevation)
+        elif 50 < water_score < 80 and 50 < drainage_score < 80 and f.get('elevation', {}).get('score', 50) < 50:
+            inferred_class = "Coastal"
+            conf = 83.0 + min(7, (water_score + drainage_score) / 25)
+            reasoning.append(f"Moderate water ({water_score:.0f}) + drainage ({drainage_score:.0f}) + low elevation")
+        # Rural detection (low infrastructure + low population + moderate vegetation)
+        elif infra_score < 50 and pop_score < 40 and 40 < vegetation_score < 70:
+            inferred_class = "Rural"
+            conf = 78.0 + (70 - infra_score) * 0.2
+            reasoning.append(f"Low infrastructure ({infra_score:.0f}) + population ({pop_score:.0f}) + moderate vegetation ({vegetation_score:.0f})")
+        # Mixed use with dominant characteristics
         else:
-            if infra_score > 70 and landuse_score < 40:
-                inferred_class = "Urban"
-                conf = 85.0 + (infra_score / 10)
-            elif poll_score < 40:
-                inferred_class = "Industrial"
-                conf = 90.0
-            elif landuse_score > 75:
-                inferred_class = "Forest"
-                conf = 88.0
-            elif vegetation_score >= 55 and landuse_score >= 40:
-                inferred_class = "Agriculture"
-                conf = 70.0 + min(20, vegetation_score / 5)
-            elif vegetation_score < 35:
-                inferred_class = "Sparse vegetation"
-                conf = 75.0 + (100 - vegetation_score) / 10
-            else:
-                inferred_class = "Mixed land use"
-                conf = 72.0
+            # Determine dominant characteristic for mixed use
+            factors_dict = {
+                'Urban': infra_score + pop_score,
+                'Natural': vegetation_score + water_score,
+                'Agricultural': landuse_score + soil_score,
+                'Industrial': poll_score
+            }
+            dominant = max(factors_dict, key=factors_dict.get)
+            inferred_class = f"Mixed Use ({dominant} dominant)"
+            conf = 72.0 + (factors_dict[dominant] - 100) * 0.1
+            reasoning.append(f"Mixed characteristics with {dominant} dominance")
 
-        # Update CNN object with verified geospatial context (15-factor cross-check)
+        # Update CNN object with enhanced geospatial context
         result['cnn_analysis']['class'] = inferred_class
         result['cnn_analysis']['confidence'] = round(conf, 1)
         result['cnn_analysis']['confidence_display'] = f"{round(conf, 1)}%"
-        result['cnn_analysis']['note'] = "Verified by 15 Geospatial Sub-Factors"
+        result['cnn_analysis']['note'] = f"Enhanced 15-factor geospatial analysis"
+        result['cnn_analysis']['reasoning'] = reasoning
+        
         if result['cnn_analysis'].get('telemetry'):
-            result['cnn_analysis']['telemetry']['verified_by'] = "15-factor geospatial cross-check"
-            result['cnn_analysis']['telemetry']['inferred_from'] = f"veg={vegetation_score:.0f}, landuse={landuse_score:.0f}, infra={infra_score:.0f}, pollution={poll_score:.0f}"
+            result['cnn_analysis']['telemetry']['verified_by'] = "Enhanced 15-factor geospatial cross-check"
+            result['cnn_analysis']['telemetry']['inferred_from'] = f"veg={vegetation_score:.0f}, landuse={landuse_score:.0f}, infra={infra_score:.0f}, poll={poll_score:.0f}, pop={pop_score:.0f}"
             result['cnn_analysis']['telemetry']['vegetation_score'] = round(vegetation_score, 1)
             result['cnn_analysis']['telemetry']['landuse_score'] = round(landuse_score, 1)
             result['cnn_analysis']['telemetry']['slope_suitability'] = round(slope_score, 1)
             result['cnn_analysis']['telemetry']['water_proximity'] = round(water_score, 1)
+            result['cnn_analysis']['telemetry']['infrastructure_score'] = round(infra_score, 1)
+            result['cnn_analysis']['telemetry']['population_density'] = round(pop_score, 1)
+            result['cnn_analysis']['telemetry']['pollution_level'] = round(poll_score, 1)
+            result['cnn_analysis']['telemetry']['soil_quality'] = round(soil_score, 1)
+            result['cnn_analysis']['telemetry']['rainfall_level'] = round(rainfall_score, 1)
+            result['cnn_analysis']['telemetry']['thermal_intensity'] = round(thermal_score, 1)
+            result['cnn_analysis']['telemetry']['flood_risk'] = round(flood_score, 1)
+            result['cnn_analysis']['telemetry']['drainage_quality'] = round(drainage_score, 1)
+            result['cnn_analysis']['telemetry']['classification_reasoning'] = reasoning
 
         # 5. FETCH NEARBY AMENITIES (Preserved Logic)
         nearby_list = get_nearby_named_places(latitude, longitude)
@@ -2569,6 +2636,41 @@ def generate_report():
         logger.exception("Internal PDF Generation Error")
         return jsonify({"error": "Failed to generate tactical report. See server logs."}), 500
     
+@app.route("/simulate-development", methods=["POST","OPTIONS"])
+def simulate_development():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+
+    try:
+        data = request.json or {}
+        latitude = float(data["latitude"])
+        longitude = float(data["longitude"])
+        development_type = data["development_type"]
+        existing_factors = data.get("existing_factors", {})
+        placed_developments = data.get("placed_developments", [])
+
+        # Calculate development impact
+        simulation_results = calculate_development_impact(
+            latitude=latitude,
+            longitude=longitude,
+            development_type=development_type,
+            existing_factors=existing_factors,
+            placed_developments=placed_developments
+        )
+
+        return jsonify({
+            "status": "success",
+            "simulation": simulation_results
+        })
+
+    except Exception as e:
+        logger.error(f"Development simulation error: {e}")
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
+
+
 @app.route("/nearby_places", methods=["POST","OPTIONS"])
 def nearby_places_route():
     if request.method == "OPTIONS":
