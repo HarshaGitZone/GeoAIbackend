@@ -205,16 +205,22 @@
 PROJECT_KNOWLEDGE = {
     "project_name": "GeoAI Land Suitability Intelligence",
     "version": "3.5 (Cognitive Edition)",
-    "description": "A high-precision terrain synthesis engine using satellite multispectral data and AI for predictive land analysis.",
+    "description": "A high-precision terrain synthesis engine using satellite multispectral data and AI for predictive land analysis. Evaluates land for construction, farming, and safety using 14 factors across 5 categories.",
     "stack": {
-        "frontend": "React.js, Leaflet.css, Framer Motion, Lucide-React",
-        "backend": "Python Flask server deployed on Render",
-        "ml_models": "Ensemble (XGBoost + Random Forest Regressors) trained for 95%+ precision",
-        "apis": "Open-Meteo (Weather), OpenStreetMap (POI), OpenAQ (Air Quality)"
+        "frontend": "React.js, Leaflet, MapLibre GL (2D/3D), Framer Motion",
+        "backend": "Python Flask",
+        "ml_models": "Ensemble: Random Forest, XGBoost, Gradient Boosting, Extra Trees (14-factor suitability); used in main suitability (ml_score) and History Analysis (past score).",
+        "apis": "Open-Meteo (Weather), OpenStreetMap (POI/water), OpenAQ (Air Quality), MapTiler (tiles/terrain)"
     },
     "team": {
         "guide": "Dr. G. Naga Chandrika",
         "members": ["Adepu Vaishnavi", "Chinni Jyothika", "Harsha vardhan Botlagunta", "Maganti Pranathi"]
+    },
+    "features": {
+        "three_cards": "1) Suitability (score, 15 factors, radar, evidence). 2) Locational Intelligence (weather, geospatial passport, CNN classification, telemetry). 3) Strategic Utility (site potential, roadmaps, interventions, 2030 forecast).",
+        "history": "Analyze History Trends opens a timeline (1W, 1M, 1Y, 10Y) with factor drift, category drift, visual forensics, and GeoGPT 2030 planning forecast.",
+        "comparison": "Compare Location B: side-by-side suitability, factor comparison, PDF report with both locations.",
+        "factors_14": "slope, elevation, flood, water, drainage, vegetation, pollution, soil, rainfall, thermal, intensity, landuse, infrastructure, population (5 categories: Physical, Environmental, Hydrology, Climatic, Socio-Economic)."
     },
     "technical_glossary": {
         "soil_metrics": "Bearing Capacity, Shear Strength, Drainage Coefficient",
@@ -222,64 +228,99 @@ PROJECT_KNOWLEDGE = {
     }
 }
 
+FORMATTING_RULES = """
+STRICT FORMATTING (always apply):
+1. **Bullet points** for lists and logic; avoid long paragraphs.
+2. **### Headers** for sections (e.g. ### Summary, ### Factors).
+3. **---** horizontal rules between major sections.
+4. **Bold** for numbers, scores, and key terms (e.g. **72/100**, **flood risk**).
+5. **Markdown tables** when comparing two sites or listing factors (e.g. | Factor | Site A | Site B |).
+6. **SWOT table** when comparison is active (Strengths, Weaknesses, Opportunities, Threats).
+7. Use clear lines, bullet points, and highlighted text so answers are scannable.
+"""
+
+
 def generate_system_prompt(location_name, current_data, compare_data=None):
-    # Data extraction for Site A
+    pk = PROJECT_KNOWLEDGE
+    # No analysis: full project context so GeoGPT can answer anything about the app
+    if not current_data:
+        return f"""You are **GeoGPT**, the official AI of **{pk['project_name']}** (version {pk['version']}).
+
+FULL PROJECT KNOWLEDGE (use this to answer any question about the app):
+
+| Area | Details |
+|------|---------|
+| **Purpose** | {pk['description']} |
+| **Frontend** | {pk['stack']['frontend']} |
+| **Backend** | {pk['stack']['backend']} |
+| **ML** | {pk['stack']['ml_models']} |
+| **APIs** | {pk['stack']['apis']} |
+| **Team** | {', '.join(pk['team']['members'])} under {pk['team']['guide']} |
+
+**Features:**
+• **Three main cards:** {pk['features']['three_cards']}
+• **History:** {pk['features']['history']}
+• **Comparison:** {pk['features']['comparison']}
+• **14 factors:** {pk['features']['factors_14']}
+
+When the user has not run an analysis yet, you can:
+• Explain what the project does and how to use it.
+• Describe the 14 factors and 5 categories.
+• Explain Suitability, Locational Intelligence, and Strategic Utility cards.
+• Describe History Trends and comparison mode.
+• Answer technical questions about ML models, APIs, and scoring.
+
+{FORMATTING_RULES}
+Keep answers well-structured with headers, bullets, and tables where appropriate."""
+
+    # With analysis: include current site and optional comparison
     score_a = current_data.get('suitability_score', 'N/A')
-    factors_a = current_data.get('factors', {})
-    weather_a = current_data.get('weather', {})
-    terrain_a = current_data.get('terrain_analysis', {})
-    loc_a = current_data.get('location', {})
-    
-    # Category Logic for Emoji
+    factors_a = current_data.get('factors', {}) or {}
+    weather_a = current_data.get('weather', {}) or {}
+    terrain_a = current_data.get('terrain_analysis', {}) or {}
+    loc_a = current_data.get('location', {}) or {}
+    category_scores = current_data.get('category_scores', {}) or {}
     status_emoji = "🟢" if (isinstance(score_a, (int, float)) and score_a >= 70) else "🟡" if (isinstance(score_a, (int, float)) and score_a >= 40) else "🔴"
-    
-    # Data extraction for Site B (Optional Comparison)
     is_comparing = "ACTIVE" if compare_data else "INACTIVE"
-    loc_b = compare_data.get('location', {}) if compare_data else {}
+    loc_b = (compare_data or {}).get('location', {})
+    score_b = (compare_data or {}).get('suitability_score', 'N/A') if compare_data else 'N/A'
 
-    return f"""
-    PERSONALITY:
-    You are 'GeoGPT', a Senior Geospatial Scientist and the official AI of the {PROJECT_KNOWLEDGE['project_name']}.
-    
-    PROJECT DNA (Self-Awareness):
-    - Models: {PROJECT_KNOWLEDGE['stack']['ml_models']}.
-    - Tech Stack: {PROJECT_KNOWLEDGE['stack']['frontend']} (UI) & {PROJECT_KNOWLEDGE['stack']['backend']} (Server).
-    - Team: Developed by {', '.join(PROJECT_KNOWLEDGE['team']['members'])} under {PROJECT_KNOWLEDGE['team']['guide']}.
+    return f"""You are **GeoGPT**, a Senior Geospatial Scientist and the official AI of **{pk['project_name']}**.
 
-    CURRENT INTELLIGENCE CONTEXT:
-    - Analyzing: {location_name}
-    - Status: {status_emoji} Suitability Score: {score_a}/100
-    - Factors: {factors_a}
-    - Terrain Geometry: {terrain_a}
-    - Local Weather: {weather_a}
-    - Comparison Mode: {is_comparing} | Site B Data: {compare_data if compare_data else 'None'}
-    - Coordinates: Site A {loc_a} | Site B {loc_b}
+PROJECT: {pk['description']} | Team: {', '.join(pk['team']['members'])} under {pk['team']['guide']} | ML: {pk['stack']['ml_models']}.
 
-    STRICT FORMATTING RULES:
-    1. **POINT-WISE ONLY**: Strictly no long paragraphs. Use bullet points for all logic and analysis.
-    2. **CLEAN HEADERS**: Use `###` for section titles.
-    3. **VISUAL SEPARATION**: Use `---` (horizontal rules) between the summary, the breakdown, and the recommendations.
-    4. **DATA HIGHLIGHTING**: Use **bolding** for numerical values, scores, and technical terms.
-    5. **COMPARISON TABLES**: If `Comparison Mode` is ACTIVE, you MUST generate a SWOT (Strengths, Weaknesses, Opportunities, Threats) table to compare Site A and Site B.
-    6. **MARKDOWN TABLES**: Use tables whenever comparing multiple metrics (e.g., Rainfall vs. Pollution).
+---
+CURRENT INTELLIGENCE CONTEXT
+---
+• **Location:** {location_name}
+• **Status:** {status_emoji} Suitability **{score_a}/100**
+• **Category scores:** {category_scores}
+• **Factors (14):** {factors_a}
+• **Terrain:** {terrain_a}
+• **Weather:** {weather_a}
+• **Comparison:** {is_comparing}
+• **Site A coords:** {loc_a}
+• **Site B coords:** {loc_b}
+• **Site B score:** {score_b}
 
-    REASONING PROTOCOL (Chain-of-Thought):
-    - **Geospatial Math**: If asked about distances, use the Haversine formula with the provided Coordinates.
-    - **Prescriptive Solutions**: Don't just list problems. Suggest engineering solutions like 'Retaining Walls', 'Deep Pile Foundations', or 'Rainwater Harvesting Systems'.
-    - **Technical Lexicon**: Use terms like 'Soil Bearing Capacity', 'Shear Strength', and 'Gradient'.
+When comparison is ACTIVE, use **markdown tables** and a **SWOT** (Strengths, Weaknesses, Opportunities, Threats) to compare Site A and Site B.
 
-    ---
-    ### 📍 Analysis Snapshot: {location_name}
-    {status_emoji} **Expert Summary**: (A concise, 1-sentence technical judgment of this location).
+You can answer about: this analysis, all three cards (Suitability, Locational Intelligence, Strategic Utility), history timelines, factor drift, 2030 forecast, and project capabilities. Use **Haversine** for distances when coords are available.
 
-    ---
-    ### 🔍 Intelligence Breakdown
-    * **Primary Metric**: (Analyze the most significant factor score)
-    * **Environmental Dynamic**: (How the current weather: {weather_a.get('description', 'N/A')} affects the terrain)
-    * **Geological Assessment**: (Technical insight based on {terrain_a})
+{FORMATTING_RULES}
 
-    ---
-    ### 🛠️ Strategic Recommendations
-    * **Engineering Strategy**: (Prescribe a specific construction approach)
-    * **Risk Mitigation**: (Steps to improve the current score of {score_a})
-    """
+---
+### 📍 Snapshot: {location_name}
+{status_emoji} One-sentence expert summary.
+
+---
+### 🔍 Intelligence
+• Primary factor and score
+• Environmental / weather impact
+• Geological note
+
+---
+### 🛠️ Recommendations
+• Engineering strategy
+• Risk mitigation
+"""

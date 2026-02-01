@@ -81,34 +81,31 @@ MODEL_PATH = os.path.join(BASE_DIR, "ml", "models")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_KEY = os.getenv("GROQ_API_KEY")
 
-# --- Initialize Gemini Client ---
-client = None
-if GEMINI_KEY:
-    try:
-        client = genai.Client(api_key=GEMINI_KEY)
-        logging.info("✅ Gemini client initialized.")
-    except Exception as e:
-        logging.error(f"❌ Gemini Init Failed: {e}")
-else:
-    logging.warning("⚠️ GEMINI_API_KEY missing.")
-
-# --- Initialize Groq Client (Fallback) ---
+# --- Groq (Primary) and Gemini (Secondary backup) for GeoGPT ---
 groq_client = None
 if GROQ_KEY:
     try:
-        # Standard Groq initialization
         groq_client = Groq(api_key=GROQ_KEY)
-        logging.info("✅ Groq fallback client initialized.")
+        logging.info("GeoGPT primary (Groq): READY.")
     except Exception as e:
-        logging.error(f"❌ Groq Init Failed: {e}")
+        logging.error(f"Groq Init Failed: {e}")
 else:
-    logging.warning("⚠️ GROQ_API_KEY missing. Fallback engine will be unavailable.")
+    logging.warning("GROQ_API_KEY missing. GeoGPT primary unavailable.")
 
-# Quick Console Summary for you
-print(f"--- GeoAI Engine Status ---")
-print(f"Primary (Gemini): {'READY' if client else 'OFFLINE'}")
-print(f"Fallback (Groq):  {'READY' if groq_client else 'OFFLINE'}")
-print(f"---------------------------")
+client = None  # Gemini as secondary
+if GEMINI_KEY:
+    try:
+        client = genai.Client(api_key=GEMINI_KEY)
+        logging.info("GeoGPT backup (Gemini): READY.")
+    except Exception as e:
+        logging.error(f"Gemini Init Failed: {e}")
+else:
+    logging.warning("GEMINI_API_KEY missing. GeoGPT backup unavailable.")
+
+print("--- GeoAI Engine Status ---")
+print(f"GeoGPT Primary (Groq):   {'READY' if groq_client else 'OFFLINE'}")
+print(f"GeoGPT Backup (Gemini):  {'READY' if client else 'OFFLINE'}")
+print("---------------------------")
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
@@ -157,17 +154,53 @@ def get_cache_key(lat, lng):
     """Generate cache key with 4 decimal precision"""
     return f"{float(lat):.4f},{float(lng):.4f}"
 
-# --- ML Model Loading ---
+# --- ML Model Loading (optional; app works without .pkl files) ---
+# Same 14 factors and order as backend/ml/train_model.py (FACTOR_ORDER).
+ML_FACTOR_ORDER = [
+    "slope", "elevation", "flood", "water", "drainage",
+    "vegetation", "pollution", "soil", "rainfall", "thermal", "intensity",
+    "landuse", "infrastructure", "population",
+]
 ML_MODELS = {}
-for name in ("model_xgboost.pkl", "model_rf.pkl"):
+for name in ("model_rf.pkl", "model_xgboost.pkl", "model_gbm.pkl", "model_et.pkl", "model_lgbm.pkl"):
     p = os.path.join(MODEL_PATH, name)
     if os.path.exists(p):
         try:
             with open(p, "rb") as f:
                 ML_MODELS[name] = pickle.load(f)
-            print(f"Loaded: {name}")
+            print(f"Loaded optional ML model: {name}")
         except Exception as e:
-            print(f"Failed {name}: {e}")
+            print(f"Optional ML model {name} skipped: {e}")
+
+
+def _ml_14feature_vector(flat_factors):
+    """Build 14-feature vector (same order as train_model.py FACTOR_ORDER). flat_factors: dict of factor name -> 0-100."""
+    vals = []
+    for k in ML_FACTOR_ORDER:
+        v = flat_factors.get(k)
+        if v is None and k == "infrastructure":
+            v = flat_factors.get("proximity")
+        vals.append(float(v) if v is not None else 50.0)
+    return np.array([vals], dtype=np.float64)
+
+
+def _predict_suitability_ml(flat_factors):
+    """If any ML model is loaded, return (ensemble score, True, source_label). Else (None, False, None)."""
+    if not ML_MODELS:
+        return None, False, None
+    try:
+        feat = _ml_14feature_vector(flat_factors)
+        scores = []
+        for name, model in ML_MODELS.items():
+            scores.append(float(model.predict(feat)[0]))
+        score = round(max(0, min(100, sum(scores) / len(scores))), 2)
+        names = [n.replace("model_", "").replace(".pkl", "") for n in ML_MODELS]
+        source = "Ensemble (" + ", ".join(names) + ")"
+        return score, True, source
+    except Exception:
+        return None, False, None
+
+
 # def get_live_weather(lat, lng):
 #     try:
 #         url = "https://api.open-meteo.com/v1/forecast"
@@ -557,92 +590,56 @@ def ask_geogpt():
     data = request.json or {}
     user_query = data.get('query')
     chat_history = data.get('history', [])
-    current_data = data.get('currentData')  # Site A
+    current_data = data.get('currentData')  # Site A (can be null when no analysis)
     compare_data = data.get('compareData')  # Site B
-    location_name = data.get('locationName')
+    location_name = data.get('locationName') or "Current location"
 
-    if not current_data:
-        return jsonify({"answer": "### 🌍 Intelligence Awaiting\nPlease analyze a location on the map first so I can access the geospatial data stream!"})
+    if not (groq_client or client):
+        return jsonify({"answer": "### Systems Offline\nGeoGPT primary (Groq) and backup (Gemini) are unconfigured. Please set GROQ_API_KEY (and optionally GEMINI_API_KEY)."})
 
-    # Check if we have at least one engine available
-    if not (client or groq_client):
-        return jsonify({"answer": "### ⚠️ Systems Offline\nBoth primary (Gemini) and fallback (Groq) engines are unconfigured. Please check your API keys."})
-
-    # 1. Prepare shared context
     system_context = generate_system_prompt(location_name, current_data, compare_data)
 
-    # --- PRIMARY ATTEMPT: GEMINI ---
-    if client:
-        try:
-            # Format history for Gemini
-            formatted_history_gemini = []
-            for msg in chat_history[-6:]: 
-                role = "user" if msg['role'] == 'user' else "model"
-                formatted_history_gemini.append({"role": role, "parts": [{"text": msg['content']}]})
+    # Format last 6 messages for context
+    formatted_history = []
+    for msg in chat_history[-6:]:
+        formatted_history.append({"role": "user" if msg.get("role") == "user" else "assistant", "content": msg.get("content", "")})
 
-            chat_session = client.chats.create(
-                model="gemini-2.0-flash", 
-                config={
-                    "system_instruction": system_context,
-                    "temperature": 0.7, 
-                },
-                history=formatted_history_gemini
-            )
+    messages = [{"role": "system", "content": system_context}] + formatted_history + [{"role": "user", "content": user_query}]
 
-            response = chat_session.send_message(user_query)
-            
-            return jsonify({
-                "answer": response.text,
-                "status": "success"
-            })
-
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Gemini Error: {error_msg}")
-
-            # If it's NOT a rate limit error, and Groq isn't available, fail early
-            is_rate_limit = any(x in error_msg for x in ["429", "RESOURCE_EXHAUSTED", "quota"])
-            if not is_rate_limit or not groq_client:
-                return jsonify({"answer": f"### ⚠️ Gemini Error\n{error_msg}"}), 500
-
-    # --- FALLBACK ATTEMPT: GROQ ---
-    # This runs if Gemini failed due to rate limits OR if Gemini client wasn't initialized
+    # --- PRIMARY: Groq ---
     if groq_client:
         try:
-            logger.info("Engaging Groq Fallback Engine...")
-            
-            # Format history for Groq (Standard OpenAI style)
-            formatted_history_groq = []
-            for msg in chat_history[-6:]:
-                role = "user" if msg['role'] == 'user' else "assistant"
-                formatted_history_groq.append({"role": role, "content": msg['content']})
-
-            # Prepend system context as a system message
-            messages = [
-                {"role": "system", "content": system_context}
-            ] + formatted_history_groq + [
-                {"role": "user", "content": user_query}
-            ]
-
             completion = groq_client.chat.completions.create(
-                # model="llama3-70b-8192", # High-capacity model
                 model="llama-3.3-70b-versatile",
                 messages=messages,
                 temperature=0.7,
             )
+            answer = completion.choices[0].message.content
+            return jsonify({"answer": answer, "status": "success"})
+        except Exception as e:
+            logger.error(f"Groq Error: {e}")
+            if not client:
+                return jsonify({"answer": f"### Groq Error\n{str(e)[:200]}"}), 500
 
-            fallback_answer = completion.choices[0].message.content
-            
-            return jsonify({
-                "answer": fallback_answer + "\n\n*(⚡ Fallback Engine Active)*",
-                "status": "success_fallback"
-            })
+    # --- BACKUP: Gemini ---
+    if client:
+        try:
+            formatted_gemini = []
+            for msg in chat_history[-6:]:
+                role = "user" if msg.get("role") == "user" else "model"
+                formatted_gemini.append({"role": role, "parts": [{"text": msg.get("content", "")}]})
+            chat_session = client.chats.create(
+                model="gemini-2.0-flash",
+                config={"system_instruction": system_context, "temperature": 0.7},
+                history=formatted_gemini
+            )
+            response = chat_session.send_message(user_query)
+            return jsonify({"answer": response.text, "status": "success_backup"})
+        except Exception as e:
+            logger.error(f"Gemini Error: {e}")
+            return jsonify({"answer": f"### Engine Error\n{str(e)[:200]}"}), 500
 
-        except Exception as groq_e:
-            logger.error(f"Groq Fallback Error: {groq_e}")
-            return jsonify({"answer": "### ⚠️ Total System Exhaustion\nBoth Gemini and Groq are currently unavailable."}), 500
-
-    return jsonify({"answer": "### ⚠️ Cognitive Lapse\nUnable to process request with available engines."}), 500
+    return jsonify({"answer": "### Unable to process request."}), 500
 import requests
 import math
 
@@ -1058,8 +1055,7 @@ def get_strategic_intelligence(current_factors, current_score):
 
 def _extract_flat_factors(factors: dict) -> dict:
     """
-    Flattens the nested 15-factor structure into a simple dict for ML models and history analysis.
-    Maps to the original 8-factor names for backward compatibility with ML models.
+    Flattens the nested 15-factor structure into a simple dict for ML (14 factors) and history analysis.
     """
     def _get_val(cat: str, key: str, fallback: float = 50.0) -> float:
         try:
@@ -1154,18 +1150,27 @@ def get_history():
             p_rain_mm = fetch_historical_weather_stats(lat, lng, int(offset) if offset >= 1 else 1)
             p_rain_score = max(0, min(100, 100 - (p_rain_mm / 10) if p_rain_mm < 800 else 20))
             
-            # ML Ensemble Prediction (uses original 8-factor format)
-            feat = np.array([[
-                p_rain_score, 
-                p_flood, 
-                f.get('landslide', 50),
-                p_soil, 
-                p_prox, 
-                f.get('water', 50), 
-                f.get('pollution', 50) + (2 * offset), 
-                p_land
-            ]], dtype=float)
-            p_score = round((float(ML_MODELS['model_xgboost.pkl'].predict(feat)[0]) + float(ML_MODELS['model_rf.pkl'].predict(feat)[0])) / 2, 2)
+            # Past category scores (same 5-category formula as Aggregator)
+            past_physical = (f.get('slope', 50) + f.get('elevation', 50)) / 2
+            past_environmental = (max(0, min(100, f.get('vegetation', 50) + drift_vegetation)) + p_soil + (f.get('pollution', 50) + drift_pollution)) / 3.0
+            past_hydrology = (f.get('water', 50) + f.get('drainage', 50)) / 2
+            past_climatic = (p_rain_score + (f.get('thermal', 50) + drift_thermal)) / 2
+            past_socio = (p_prox + p_land + (f.get('population', 50) + drift_population)) / 3
+            p_score_rule = round((past_physical + past_environmental + past_hydrology + past_climatic + past_socio) / 5.0, 2)
+            # Use ML ensemble (14-factor) for p_score when any model is loaded
+            p_pollution = max(0, min(100, f.get('pollution', 50) + drift_pollution))
+            p_vegetation = max(0, min(100, f.get('vegetation', 50) + drift_vegetation))
+            p_thermal = max(0, min(100, f.get('thermal', 50) + drift_thermal))
+            p_population = max(0, min(100, f.get('population', 50) + drift_population))
+            past_flat = {
+                "slope": f.get('slope', 50), "elevation": f.get('elevation', 50),
+                "flood": p_flood, "water": f.get('water', 50), "drainage": f.get('drainage', 50),
+                "vegetation": p_vegetation, "pollution": p_pollution, "soil": p_soil,
+                "rainfall": p_rain_score, "thermal": p_thermal, "intensity": f.get('intensity', 50),
+                "landuse": p_land, "infrastructure": p_prox, "population": p_population,
+            }
+            p_score_ml, ml_used, score_source_ml = _predict_suitability_ml(past_flat)
+            p_score = p_score_ml if ml_used else p_score_rule
             
             # Urbanization Velocity (The Derivative)
             prox_change = f.get('proximity', 50) - p_prox
@@ -1192,13 +1197,7 @@ def get_history():
                 "population": round(drift_population, 2),
             }
 
-            # Past category scores (same formula as Aggregator: physical, environmental, hydrology, climatic, socio_econ)
-            past_physical = (f.get('slope', 50) + f.get('elevation', 50)) / 2
-            past_environmental = (max(0, min(100, f.get('vegetation', 50) + drifts['vegetation'])) + p_soil + (f.get('pollution', 50) + drifts['pollution'])) / 3.0
-            past_hydrology = (f.get('water', 50) + f.get('drainage', 50)) / 2
-            past_climatic = (p_rain_score + (f.get('thermal', 50) + drifts['thermal'])) / 2
-            past_socio = (p_prox + p_land + (f.get('population', 50) + drifts['population'])) / 3
-            
+            # category_scores_past (past_* already computed above for p_score)
             category_scores_past = {
                 "physical": round(past_physical, 1),
                 "environmental": round(past_environmental, 1),
@@ -1216,6 +1215,7 @@ def get_history():
 
             history_bundle[t_key] = {
                 "score": p_score,
+                "score_source": score_source_ml if ml_used else "Rule-based (5 categories)",
                 "velocity": {
                     "score": round(velocity_score, 2),
                     "label": "Hyper-Growth" if velocity_score > 7 else "Expanding" if velocity_score > 3 else "Stable"
@@ -2179,7 +2179,15 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
         "category_breakdown": {k: round(v, 1) for k, v in (agg_result.get("category_scores") or {}).items()},
     }
 
-    # 6. 📂 CONSTRUCT THE 15-FACTOR OUTPUT BUNDLE
+    # 6. Optional ML ensemble score (14-factor models; used in History and here when available)
+    flat_factors = _extract_flat_factors(f)
+    ml_score, ml_used, score_source_ml = _predict_suitability_ml(flat_factors)
+    out_extra = {}
+    if ml_used:
+        out_extra["ml_score"] = ml_score
+        out_extra["score_source_ml"] = score_source_ml
+
+    # 7. CONSTRUCT THE 15-FACTOR OUTPUT BUNDLE
     return {
         "suitability_score": agg_result["score"],
         "label": agg_result["label"],
@@ -2191,6 +2199,7 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
 
         # ALL 15 FACTORS (WITH EVIDENCE)
         "factors": f,
+        **out_extra,
 
         # HIGH-FIDELITY EXPLANATION 
         "explanation": {
