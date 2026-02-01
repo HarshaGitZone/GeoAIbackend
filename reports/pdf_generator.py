@@ -107,15 +107,25 @@ def _draw_section_header(c, x, y, width, text):
     return y - 10
 
 def _draw_terrain_module(c, terrain, x, y, width):
-    """Draws the Terrain & Slope box"""
-    if not terrain: return y
-    slope = terrain.get('slope_percent', 0)
-    verdict = terrain.get('verdict', 'N/A')
+    """Draws the Terrain & Slope box - Always displays with fallback values"""
+    # Always show terrain analysis, even if data is missing
+    slope = 0
+    verdict = "Data Unavailable"
+    
+    if terrain:
+        slope = terrain.get('slope_percent', 0) or 0
+        verdict = terrain.get('verdict', 'N/A') or 'N/A'
+    else:
+        # Fallback values when terrain data is missing
+        verdict = "Terrain data not available"
+    
     c.setFillColor(colors.HexColor("#f8fafc"))
     c.roundRect(x, y - 50, width - 80, 50, 6, fill=1, stroke=0)
     c.setFillColor(colors.black)
     c.setFont("Helvetica-Bold", 9)
     c.drawString(x + 10, y - 12, "TERRAIN & SLOPE ANALYSIS")
+    
+    # Color coding based on slope value
     slope_color = colors.HexColor("#ef4444") if slope > 15 else (colors.HexColor("#f59e0b") if slope > 5 else colors.HexColor("#10b981"))
     c.setFillColor(slope_color)
     c.setFont("Helvetica-Bold", 12)

@@ -169,7 +169,11 @@ for name in ("model_rf.pkl", "model_xgboost.pkl", "model_gbm.pkl", "model_et.pkl
     if os.path.exists(p):
         try:
             with open(p, "rb") as f:
-                ML_MODELS[name] = pickle.load(f)
+                model = pickle.load(f)
+                # Force sklearn models to ignore feature names to avoid warnings
+                if hasattr(model, 'feature_names_in_'):
+                    delattr(model, 'feature_names_in_')
+                ML_MODELS[name] = model
             print(f"Loaded optional ML model: {name}")
         except Exception as e:
             print(f"Optional ML model {name} skipped: {e}")
@@ -194,7 +198,16 @@ def _predict_suitability_ml(flat_factors):
         feat = _ml_14feature_vector(flat_factors)
         scores = []
         for name, model in ML_MODELS.items():
-            scores.append(float(model.predict(feat)[0]))
+            # Handle different model types to avoid sklearn warnings
+            if 'lgbm' in name.lower():
+                # LightGBM: create DataFrame with proper column names
+                import pandas as pd
+                feat_df = pd.DataFrame([feat], columns=ML_FACTOR_ORDER)
+                pred = model.predict(feat_df)
+            else:
+                # Other models: use numpy array
+                pred = model.predict(feat)
+            scores.append(float(pred[0]))
         score = round(max(0, min(100, sum(scores) / len(scores))), 2)
         names = [n.replace("model_", "").replace(".pkl", "") for n in ML_MODELS]
         source = "Ensemble (" + ", ".join(names) + ")"
@@ -2152,6 +2165,24 @@ def _generate_evidence_text(factor_name: str, factor_data: dict, raw_factors: di
     return f"Score: {val}/100. {label}."
 
 
+def _generate_slope_verdict(slope_percent):
+    """Generate terrain verdict based on slope percentage"""
+    if slope_percent is None:
+        return "Terrain data not available"
+    elif slope_percent <= 0:
+        return "VERY FLAT terrain. IDEAL for construction"
+    elif slope_percent < 3:
+        return "VERY FLAT terrain. IDEAL for construction"
+    elif slope_percent < 8:
+        return "GENTLE slope. Suitable for most construction"
+    elif slope_percent < 15:
+        return "MODERATE slope. Careful site planning required"
+    elif slope_percent < 30:
+        return "STEEP terrain. HIGH construction costs"
+    else:
+        return "VERY STEEP. NOT SUITABLE for standard construction"
+
+
 def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
     """
     MASTER INTEGRATION ENGINE
@@ -2268,6 +2299,14 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
         # ALL 15 FACTORS (WITH EVIDENCE)
         "factors": f,
         **out_extra,
+
+        # TERRAIN ANALYSIS (for frontend TerrainSlope component)
+        "terrain_analysis": {
+            "slope_percent": geospatial_passport.get("slope_percent", 0),
+            "verdict": _generate_slope_verdict(geospatial_passport.get("slope_percent", 0)),
+            "confidence": "High",
+            "source": "NASA SRTM"
+        },
 
         # HIGH-FIDELITY EXPLANATION 
         "explanation": {
@@ -2578,64 +2617,133 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
 #         "location": {"latitude": latitude, "longitude": longitude}
 #     }
 
+# @app.route("/generate_report", methods=["POST", "OPTIONS"])
+# def generate_report():
+    
+#     if request.method == "OPTIONS":
+#         return jsonify({}), 200
+#     try:
+#         data = request.json
+#         if not data:
+#             return jsonify({"error": "No data received"}), 400
+        
+#         # 1. Prepare Site A Intelligence
+#         loc_a = data.get("location")
+#         if loc_a:
+#             # Ensure factors and explanation exist for Site Potential logic in generator
+#             if "factors" not in data:
+#                 logger.warning("Factors missing for Site A in report generation")
+            
+#             try:
+#                 # Fetching nearby places to enrich the intelligence report
+#                 places_a = get_nearby_named_places(loc_a.get("latitude"), loc_a.get("longitude"))
+#                 data["nearby_places"] = {"places": places_a}
+#             except Exception as e:
+#                 logger.error(f"Nearby places A fetch failed: {e}")
+#                 data["nearby_places"] = {"places": []}
+
+#         # 2. Prepare Site B Intelligence (if provided)
+#         compare_data = data.get("compareData")
+#         if compare_data:
+#             loc_b = compare_data.get("location")
+#             if loc_b:
+#                 try:
+#                     places_b = get_nearby_named_places(loc_b.get("latitude"), loc_b.get("longitude"))
+#                     data["compareData"]["nearby_places"] = {"places": places_b}
+#                 except Exception as e:
+#                     logger.error(f"Nearby places B fetch failed: {e}")
+#                     data["compareData"]["nearby_places"] = {"places": []}
+
+#         # 3. Generate PDF Buffer using the helper-based pdf_generator
+#         # This now includes Site Potential Analysis based on the factors in 'data'
+#         pdf_buffer = generate_land_report(data)
+#         pdf_buffer.seek(0)
+
+#         # 4. Generate dynamic filename
+#         location_name = data.get("locationName", "Analysis")
+#         # Sanitize filename: remove non-alphanumeric chars for safety
+#         clean_name = "".join([c if c.isalnum() else "_" for c in str(location_name)])
+
+#         return send_file(
+#             pdf_buffer,
+#             as_attachment=True,
+#             download_name=f"GeoAI_Intelligence_{clean_name}.pdf",
+#             mimetype="application/pdf"
+#         )
+
+#     except Exception as e:
+#         logger.exception("Internal PDF Generation Error")
+#         return jsonify({"error": "Failed to generate tactical report. See server logs."}), 500
+    
 @app.route("/generate_report", methods=["POST", "OPTIONS"])
 def generate_report():
-    
     if request.method == "OPTIONS":
         return jsonify({}), 200
+        
     try:
         data = request.json
         if not data:
             return jsonify({"error": "No data received"}), 400
         
         # 1. Prepare Site A Intelligence
+        # We ensure 'strategic_intelligence' is prioritized as it powers Section 03
         loc_a = data.get("location")
         if loc_a:
-            # Ensure factors and explanation exist for Site Potential logic in generator
-            if "factors" not in data:
-                logger.warning("Factors missing for Site A in report generation")
+            # Check for critical Section 03 data
+            if "strategic_intelligence" not in data:
+                logger.warning("Strategic intelligence data missing for Site A")
             
+            # Enrich with nearby places for the intelligence report
             try:
-                # Fetching nearby places to enrich the intelligence report
-                places_a = get_nearby_named_places(loc_a.get("latitude"), loc_a.get("longitude"))
+                lat_a = loc_a.get("latitude") or loc_a.get("lat")
+                lng_a = loc_a.get("longitude") or loc_a.get("lng")
+                places_a = get_nearby_named_places(lat_a, lng_a)
                 data["nearby_places"] = {"places": places_a}
             except Exception as e:
                 logger.error(f"Nearby places A fetch failed: {e}")
                 data["nearby_places"] = {"places": []}
 
-        # 2. Prepare Site B Intelligence (if provided)
+        # 2. Prepare Site B Intelligence (Comparative Mode)
         compare_data = data.get("compareData")
         if compare_data:
             loc_b = compare_data.get("location")
             if loc_b:
+                # Ensure Site B also carries its own strategic insights
+                if "strategic_intelligence" not in compare_data:
+                    logger.warning("Strategic intelligence data missing for Site B")
+                
                 try:
-                    places_b = get_nearby_named_places(loc_b.get("latitude"), loc_b.get("longitude"))
+                    lat_b = loc_b.get("latitude") or loc_b.get("lat")
+                    lng_b = loc_b.get("longitude") or loc_b.get("lng")
+                    places_b = get_nearby_named_places(lat_b, lng_b)
                     data["compareData"]["nearby_places"] = {"places": places_b}
                 except Exception as e:
                     logger.error(f"Nearby places B fetch failed: {e}")
                     data["compareData"]["nearby_places"] = {"places": []}
 
-        # 3. Generate PDF Buffer using the helper-based pdf_generator
-        # This now includes Site Potential Analysis based on the factors in 'data'
+        # 3. Generate PDF Buffer 
+        # The generator now processes Section 01, 02, and 03 in order
         pdf_buffer = generate_land_report(data)
         pdf_buffer.seek(0)
 
-        # 4. Generate dynamic filename
-        location_name = data.get("locationName", "Analysis")
-        # Sanitize filename: remove non-alphanumeric chars for safety
+        # 4. Generate dynamic filename based on Location A
+        location_name = data.get("locationName") or "GeoAI_Analysis"
         clean_name = "".join([c if c.isalnum() else "_" for c in str(location_name)])
+        timestamp = datetime.now().strftime("%Y%m%d")
 
         return send_file(
             pdf_buffer,
             as_attachment=True,
-            download_name=f"GeoAI_Intelligence_{clean_name}.pdf",
+            download_name=f"GeoAI_Report_{clean_name}_{timestamp}.pdf",
             mimetype="application/pdf"
         )
 
     except Exception as e:
-        logger.exception("Internal PDF Generation Error")
-        return jsonify({"error": "Failed to generate tactical report. See server logs."}), 500
-    
+        logger.exception("Critical PDF Generation Error")
+        return jsonify({
+            "error": "Failed to generate tactical report. Internal server error.",
+            "details": str(e)
+        }), 500
 @app.route("/simulate-development", methods=["POST","OPTIONS"])
 def simulate_development():
     if request.method == "OPTIONS":
