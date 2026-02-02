@@ -1,0 +1,5 @@
+# Add this to your existing requirements.txt or install separately
+openai>=1.0.0
+
+# Installation command:
+# pip install openai
