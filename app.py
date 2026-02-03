@@ -34,6 +34,8 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import logging
 from dotenv import load_dotenv
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 load_dotenv()
 
 # --- Initialize Logging ---
@@ -313,40 +315,24 @@ def get_live_weather(lat, lng):
         params = {
             "latitude": lat,
             "longitude": lng,
-            "current": [
-                "temperature_2m",
-                "relative_humidity_2m",
-                "apparent_temperature",
-                "is_day",
-                "precipitation",
-                "weather_code",
-                "cloud_cover",
-                "wind_speed_10m",
-                "wind_direction_10m",
-                "wind_gusts_10m",
-                "surface_pressure",
-                "visibility",
-                "uv_index",
-                "dew_point_2m"
-            ],
-            "daily": [
-                "sunrise",
-                "sunset",
-                "uv_index_max",
-                "precipitation_probability_max"
-            ],
-            "hourly": [
-                "temperature_2m",
-                "relative_humidity_2m",
-                "wind_speed_10m"
-            ],
+            "current": ["temperature_2m", "relative_humidity_2m", "apparent_temperature", "is_day", 
+                       "precipitation", "weather_code", "cloud_cover", "wind_speed_10m", 
+                       "wind_direction_10m", "wind_gusts_10m", "surface_pressure", 
+                       "visibility", "uv_index", "dew_point_2m"],
+            "daily": ["sunrise", "sunset", "uv_index_max", "precipitation_probability_max"],
+            "hourly": ["temperature_2m", "relative_humidity_2m", "wind_speed_10m"],
             "timezone": "auto"
         }
-
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
         
+        try:
+            response = requests.get(url, params=params, timeout=10, verify=False)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as e:
+            logger.error(f"Weather Fetch Error: {e}")
+            # Fallback to default values
+            return {"ly": data.get("hourly", {})}
+
         current = data.get("current")
         daily = data.get("daily", {})
         hourly = data.get("hourly", {})
@@ -761,15 +747,19 @@ def get_visual_forensics(lat, lng, past_year=2017):
                 f"s2cloudless-{year}_3857/default/g/"
                 f"{zoom}/{ytile}/{xtile}.jpg"
             )
-            res = requests.get(url, timeout=5)
-            if res.status_code == 200:
-                img_temp = Image.open(BytesIO(res.content)).convert('L')
-                img_temp = img_temp.resize((256, 256))
+            try:
+                res = requests.get(url, timeout=5, verify=False)
+                if res.status_code == 200:
+                    img_temp = Image.open(BytesIO(res.content)).convert('L')
+                    img_temp = img_temp.resize((256, 256))
 
-                if np.mean(img_temp) < 240:
-                    valid_b_img = np.array(img_temp) / 255.0
-                    used_year = year
-                    break
+                    if np.mean(img_temp) < 240:
+                        valid_b_img = np.array(img_temp) / 255.0
+                        used_year = year
+                        break
+            except Exception as e:
+                logger.error(f"Tile fetch error for year {year}: {e}")
+                continue
 
         if valid_b_img is None:
             return None
@@ -782,9 +772,13 @@ def get_visual_forensics(lat, lng, past_year=2017):
             f"s2cloudless-2020_3857/default/g/"
             f"{zoom}/{ytile}/{xtile}.jpg"
         )
-        res_c = requests.get(url_current, timeout=5)
-        img_c_raw = Image.open(BytesIO(res_c.content)).convert('L').resize((256, 256))
-        img_c = np.array(img_c_raw) / 255.0
+        try:
+            res_c = requests.get(url_current, timeout=5, verify=False)
+            img_c_raw = Image.open(BytesIO(res_c.content)).convert('L').resize((256, 256))
+            img_c = np.array(img_c_raw) / 255.0
+        except Exception as e:
+            logger.error(f"Current tile fetch error: {e}")
+            return None
 
         # ---------------------------------------------------
         # 4. Visual Drift Calculation (Siam-CNN Pixel Variance)
@@ -871,7 +865,7 @@ def get_cnn_classification(lat, lng):
         )
 
         headers = {"User-Agent": "GeoAI-Client/1.0"}
-        response = requests.get(tile_url, headers=headers, timeout=5)
+        response = requests.get(tile_url, headers=headers, timeout=5, verify=False)
         response.raise_for_status()
 
         img = Image.open(BytesIO(response.content)).convert('RGB')
