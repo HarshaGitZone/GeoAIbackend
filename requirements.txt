@@ -18,3 +18,7 @@ qrcode
 torch
 torchvision
 pandas
+openai
+# AI Assistant Dependencies
+asyncio
+aiohttp
