@@ -61,14 +61,7 @@ class Aggregator:
                 "flood": 70.0,          # Moderate flood safety baseline
                 "landuse": 60.0,        # Mixed landuse baseline
                 "ruggedness": 60.0,     # Moderate terrain ruggedness baseline
-                "stability": 65.0,       # Moderate land stability baseline
-                "biodiversity": 50.0,    # Moderate biodiversity baseline
-                "heat_island": 50.0,    # Moderate heat island baseline
-                "groundwater": 60.0,     # Moderate groundwater baseline
-                "multi_hazard": 50.0,   # Moderate multi-hazard risk baseline
-                "climate_change": 50.0, # Moderate climate change stress baseline
-                "recovery": 50.0,        # Moderate recovery capacity baseline
-                "habitability": 50.0    # Moderate long-term habitability baseline
+                "stability": 65.0       # Moderate land stability baseline
             }
             return fallback_defaults.get(factor_name, default)
         try:
@@ -87,178 +80,11 @@ class Aggregator:
     def compute_suitability_score(cls, package: Dict[str, Any]) -> Dict[str, Any]:
         """
         MASTER SCORING ENGINE
-        Processes 23 factors across 6 categories.
+        Processes 15 factors across 5 categories.
         Enforces logical hard-stops for water bodies and protected zones.
         """
         raw = package.get("raw_factors", {})
         
-        # Get coordinates for dynamic defaults
-        lat = package.get("latitude")
-        lng = package.get("longitude")
-        
-        # --- 1. PHYSICAL (4 Factors: slope, elevation, ruggedness, stability) ---
-        p = raw.get("physical", {})
-        slope_data = p.get("slope")
-        slope_score = _slope_to_suitability(slope_data) if slope_data else 50.0
-        elev_data = p.get("elevation", {})
-        elev_val = elev_data.get("value") if isinstance(elev_data, dict) else elev_data
-        elev_score = _elevation_to_suitability(elev_val) if elev_val is not None else 50.0
-        ruggedness_score = cls._normalize(p.get("ruggedness"), 50.0, "ruggedness", lat, lng)
-        stability_score = cls._normalize(p.get("stability"), 50.0, "stability", lat, lng)
-        cat_physical = (slope_score + elev_score + ruggedness_score + stability_score) / 4
-
-        # --- 2. ENVIRONMENTAL (5 Factors) ---
-        e = raw.get("environmental", {})
-        # FIX for KeyError: 'ndvi_index' - Checks multiple potential keys
-        veg_data = e.get("vegetation", {})
-        ndvi_val = veg_data.get("ndvi_index") or veg_data.get("value") or 0.5
-        
-        # Proper NDVI normalization (NDVI is typically 0-1, convert to 0-100)
-        if ndvi_val is not None and 0 <= ndvi_val <= 1.0:
-            vegetation_score = ndvi_val * 100  # Convert NDVI 0-1 to 0-100
-        else:
-            vegetation_score = cls._normalize(ndvi_val, 50.0, "vegetation", lat, lng)
-        
-        cat_environmental = (
-            vegetation_score + 
-            cls._normalize(e.get("soil"), 50.0, "soil", lat, lng) + 
-            cls._normalize(e.get("pollution"), 50.0, "pollution", lat, lng) +
-            cls._normalize(e.get("biodiversity"), 50.0, "biodiversity", lat, lng) +
-            cls._normalize(e.get("heat_island"), 50.0, "heat_island", lat, lng)
-        ) / 5
-
-        # --- 3. HYDROLOGY (4 Factors) ---
-        h = raw.get("hydrology", {})
-        water_val = cls._normalize(h.get("water"), 50.0, "water", lat, lng)
-        drainage_val = cls._normalize(h.get("drainage"), 50.0, "drainage", lat, lng)
-        flood_val = cls._normalize(h.get("flood"), 50.0, "flood", lat, lng)
-        groundwater_val = cls._normalize(h.get("groundwater"), 50.0, "groundwater", lat, lng)
-        
-        # Include all 4 hydrology factors in average
-        cat_hydrology = (water_val + drainage_val + flood_val + groundwater_val) / 4
-        flood_safety = flood_val  # Keep separate for penalty logic
-
-        # --- 4. CLIMATIC (3 Factors) ---
-        c = raw.get("climatic", {})
-        cat_climatic = (
-            cls._normalize(c.get("rainfall"), 50.0, "rainfall", lat, lng) +
-            cls._normalize(c.get("thermal"), 50.0, "thermal", lat, lng) +
-            cls._normalize(c.get("intensity"), 50.0, "intensity", lat, lng)
-        ) / 3
-
-        # --- 5. SOCIO-ECONOMIC (3 Factors) ---
-        s = raw.get("socio_econ", {})
-        landuse_raw = s.get("landuse")
-        landuse_val = cls._normalize(landuse_raw, 50.0, "landuse", lat, lng)
-        landuse_class = landuse_raw.get("classification", "Unknown") if isinstance(landuse_raw, dict) else "Unknown"
-        infrastructure_data = s.get("infrastructure")
-        
-        # Use new infrastructure proximity if available, fallback to old method
-        if isinstance(infrastructure_data, dict) and "proximity_index" in infrastructure_data:
-            infrastructure_val = infrastructure_data.get("value", 50.0)
-        else:
-            infrastructure_val = cls._normalize(infrastructure_data, 50.0, "infrastructure", lat, lng)
-        
-        cat_socio = (
-            infrastructure_val +
-            landuse_val +
-            cls._normalize(s.get("population"), 50.0, "population", lat, lng)
-        ) / 3
-
-        # --- 6. RISK & RESILIENCE (4 Factors) ---
-        r = raw.get("risk_resilience", {})
-        cat_risk_resilience = (
-            cls._normalize(r.get("multi_hazard"), 50.0, "multi_hazard", lat, lng) +
-            cls._normalize(r.get("climate_change"), 50.0, "climate_change", lat, lng) +
-            cls._normalize(r.get("recovery"), 50.0, "recovery", lat, lng) +
-            cls._normalize(r.get("habitability"), 50.0, "habitability", lat, lng)
-        ) / 4
-
-        # --- Water body detection (before aggregation) ---
-        water_details = h.get("water", {}) if isinstance(h.get("water"), dict) else {}
-        water_dist = water_details.get("distance_km")
-        is_on_water = water_val <= 5 or (water_dist is not None and float(water_dist) < 0.02)
-        water_body_name = None
-        if is_on_water and isinstance(water_details.get("details"), dict):
-            water_body_name = water_details.get("details", {}).get("name") or "identified water body"
-        elif is_on_water:
-            water_body_name = "identified water body"
-
-        # When on water: physical contribution = 0 (flat on water = flood prone, not suitable)
-        if is_on_water:
-            cat_physical = 0.0
-            cat_hydrology = 0.0
-            flood_safety = 0.0
-
-        # --- FINAL AGGREGATION ---
-        weights = {"phys": 0.167, "env": 0.167, "hydro": 0.167, "clim": 0.167, "socio": 0.167, "risk": 0.167}
-        base_score = (
-            (cat_physical * weights["phys"]) +
-            (cat_environmental * weights["env"]) +
-            (cat_hydrology * weights["hydro"]) +
-            (cat_climatic * weights["clim"]) +
-            (cat_socio * weights["socio"]) +
-            (cat_risk_resilience * weights["risk"])
-        )
-
-        # 🚨 MASTER PENALTY LOGIC
-        final_score = base_score
-        penalty_note = "None"
-        is_hard_unsuitable = False
-        label = "Highly Suitable" if final_score > 75 else "Suitable" if final_score > 40 else "High Risk"
-        water_body_snippet = None
-        protected_snippet = None
-
-        # Water Body — low score (not zero) so other factors still visible; label/snippet remain clear
-        if is_on_water:
-            final_score = min(final_score, 12.0)
-            penalty_note = "Non-Terrestrial (Open Water)"
-            is_hard_unsuitable = True
-            label = "Not Suitable (Water Body)"
-            water_body_snippet = water_body_name or "Open water"
-
-        # Flood Hazard Multiplier (only when not on water)
-        if not is_on_water and flood_safety < 40:
-            final_score *= 0.5
-            penalty_note = "High Flood Inundation Hazard"
-
-        # Forest/Protected Area — immediate detail and low score
-        if landuse_val <= 20:
-            final_score = min(final_score, 20.0)
-            penalty_note = "Protected Environmental Zone"
-            if not is_on_water:
-                label = "Not Suitable (Protected/Forest Area)"
-                protected_snippet = landuse_class if landuse_class and landuse_class != "Unknown" else "Protected zone"
-
-        flat_factors = {
-            "rainfall": cls._normalize(c.get("rainfall")),
-            "flood": flood_safety,
-            "landslide": slope_score,
-            "soil": cls._normalize(e.get("soil")),
-            "proximity": cls._normalize(s.get("infrastructure")),
-            "water": water_val,
-            "pollution": cls._normalize(e.get("pollution")),
-            "landuse": landuse_val
-        }
-
-        return {
-            "score": round(final_score, 1),
-            "label": label,
-            "is_hard_unsuitable": is_hard_unsuitable,
-            "water_body_snippet": water_body_snippet,
-            "protected_snippet": protected_snippet,
-            "category_scores": {
-                "physical": round(cat_physical, 1),
-                "environmental": round(cat_environmental, 1),
-                "hydrology": round(cat_hydrology, 1),
-                "climatic": round(cat_climatic, 1),
-                "socio_econ": round(cat_socio, 1),
-                "risk_resilience": round(cat_risk_resilience, 1)
-            },
-            "factors": flat_factors,
-            "penalty": penalty_note
-        }
-
     @staticmethod
     def _get_dynamic_default(factor_name: str, lat: float, lng: float) -> float:
         """Calculate dynamic default values based on geographic context."""
@@ -296,20 +122,6 @@ class Aggregator:
                 return Aggregator._get_ruggedness_default(is_urban, region, climate_zone)
             elif factor_name == "stability":
                 return Aggregator._get_stability_default(is_urban, region, climate_zone)
-            elif factor_name == "biodiversity":
-                return Aggregator._get_biodiversity_default(is_urban, region, climate_zone)
-            elif factor_name == "heat_island":
-                return Aggregator._get_heat_island_default(is_urban, region, climate_zone)
-            elif factor_name == "groundwater":
-                return Aggregator._get_groundwater_default(is_urban, region, climate_zone)
-            elif factor_name == "multi_hazard":
-                return Aggregator._get_multi_hazard_default(is_urban, region, climate_zone)
-            elif factor_name == "climate_change":
-                return Aggregator._get_climate_change_default(is_urban, region, climate_zone)
-            elif factor_name == "recovery":
-                return Aggregator._get_recovery_default(is_urban, region, climate_zone)
-            elif factor_name == "habitability":
-                return Aggregator._get_habitability_default(is_urban, region, climate_zone)
             
         except Exception:
             # Fallback on any error
@@ -565,126 +377,154 @@ class Aggregator:
             else:
                 return 65.0  # Moderate rural stability
     
-    @staticmethod
-    def _get_biodiversity_default(is_urban: str, region: str, climate_zone: str) -> float:
-        """Dynamic biodiversity default based on context."""
-        if is_urban == "high":
-            return 25.0  # Low biodiversity in cities
-        elif is_urban == "medium":
-            return 45.0  # Moderate biodiversity in suburbs
+    @classmethod
+    def compute_suitability_score(cls, package: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        MASTER SCORING ENGINE
+        Processes 15 factors across 5 categories.
+        Enforces logical hard-stops for water bodies and protected zones.
+        """
+        raw = package.get("raw_factors", {})
+        
+        # Get coordinates for dynamic defaults
+        lat = package.get("latitude")
+        lng = package.get("longitude")
+        
+        # --- 1. PHYSICAL (4 Factors: slope, elevation, ruggedness, stability) ---
+        p = raw.get("physical", {})
+        slope_data = p.get("slope")
+        slope_score = _slope_to_suitability(slope_data) if slope_data else 50.0
+        elev_data = p.get("elevation", {})
+        elev_val = elev_data.get("value") if isinstance(elev_data, dict) else elev_data
+        elev_score = _elevation_to_suitability(elev_val) if elev_val is not None else 50.0
+        ruggedness_score = cls._normalize(p.get("ruggedness"), 50.0, "ruggedness", lat, lng)
+        stability_score = cls._normalize(p.get("stability"), 50.0, "stability", lat, lng)
+        cat_physical = (slope_score + elev_score + ruggedness_score + stability_score) / 4
+
+        # --- 2. ENVIRONMENTAL (5 Factors) ---
+        e = raw.get("environmental", {})
+        # FIX for KeyError: 'ndvi_index' - Checks multiple potential keys
+        veg_data = e.get("vegetation", {})
+        ndvi_val = veg_data.get("ndvi_index") or veg_data.get("value") or 0.5
+        
+        # Proper NDVI normalization (NDVI is typically 0-1, convert to 0-100)
+        if ndvi_val is not None and 0 <= ndvi_val <= 1.0:
+            vegetation_score = ndvi_val * 100  # Convert NDVI 0-1 to 0-100
         else:
-            # Rural biodiversity by climate
-            biodiversity_by_climate = {
-                "tropical": 85.0,    # High biodiversity in tropics
-                "subtropical": 70.0,  # Good biodiversity
-                "temperate": 60.0,    # Moderate biodiversity
-                "cool": 40.0,         # Low biodiversity
-                "polar": 20.0          # Very low biodiversity
-            }
-            return biodiversity_by_climate.get(climate_zone, 50.0)
-    
-    @staticmethod
-    def _get_heat_island_default(is_urban: str, region: str, climate_zone: str) -> float:
-        """Dynamic heat island default based on context."""
-        if is_urban == "high":
-            return 25.0  # High heat island effect in cities
-        elif is_urban == "medium":
-            return 45.0  # Moderate heat island in suburbs
-        else:
-            # Rural heat island by climate
-            heat_island_by_climate = {
-                "tropical": 60.0,    # Moderate heat island in tropics
-                "subtropical": 50.0,  # Low heat island
-                "temperate": 40.0,    # Low heat island
-                "cool": 30.0,         # Very low heat island
-                "polar": 20.0          # Minimal heat island
-            }
-            return heat_island_by_climate.get(climate_zone, 50.0)
-    
-    @staticmethod
-    def _get_groundwater_default(is_urban: str, region: str, climate_zone: str) -> float:
-        """Dynamic groundwater default based on context."""
-        if is_urban == "high":
-            return 40.0  # Lower groundwater in cities (pavement, runoff)
-        elif is_urban == "medium":
-            return 55.0  # Moderate groundwater in suburbs
-        else:
-            # Rural groundwater by climate
-            groundwater_by_climate = {
-                "tropical": 70.0,    # High groundwater in tropics
-                "subtropical": 65.0,  # Good groundwater
-                "temperate": 60.0,    # Moderate groundwater
-                "cool": 50.0,         # Lower groundwater
-                "polar": 30.0          # Very low groundwater (frozen)
-            }
-            return groundwater_by_climate.get(climate_zone, 50.0)
-    
-    @staticmethod
-    def _get_multi_hazard_default(is_urban: str, region: str, climate_zone: str) -> float:
-        """Dynamic multi-hazard risk default based on context."""
-        if is_urban == "high":
-            return 60.0  # Higher risk in cities (heat, flood)
-        elif is_urban == "medium":
-            return 50.0  # Moderate risk in suburbs
-        else:
-            # Rural risk by climate
-            hazard_by_climate = {
-                "tropical": 70.0,    # High hazard risk (flood, storms)
-                "subtropical": 60.0,  # Moderate hazard risk
-                "temperate": 40.0,    # Lower hazard risk
-                "cool": 30.0,         # Low hazard risk
-                "polar": 20.0          # Very low hazard risk
-            }
-            return hazard_by_climate.get(climate_zone, 40.0)
-    
-    @staticmethod
-    def _get_climate_change_default(is_urban: str, region: str, climate_zone: str) -> float:
-        """Dynamic climate change stress default based on context."""
-        # Climate change stress is higher in vulnerable regions
-        stress_by_climate = {
-            "tropical": 70.0,    # High climate change stress
-            "subtropical": 60.0,  # Moderate climate change stress
-            "temperate": 50.0,    # Moderate climate change stress
-            "cool": 40.0,         # Lower climate change stress
-            "polar": 30.0          # High change but lower impact
+            vegetation_score = cls._normalize(ndvi_val, 50.0, "vegetation", lat, lng)
+        
+        cat_environmental = (
+            vegetation_score + 
+            cls._normalize(e.get("soil"), 50.0, "soil", lat, lng) + 
+            cls._normalize(e.get("pollution"), 50.0, "pollution", lat, lng) +
+            cls._normalize(e.get("biodiversity"), 50.0, "biodiversity", lat, lng) +
+            cls._normalize(e.get("heat_island"), 50.0, "heat_island", lat, lng)
+        ) / 5
+
+        # --- 3. HYDROLOGY (4 Factors) ---
+        h = raw.get("hydrology", {})
+        water_val = cls._normalize(h.get("water"), 50.0, "water", lat, lng)
+        drainage_val = cls._normalize(h.get("drainage"), 50.0, "drainage", lat, lng)
+        flood_val = cls._normalize(h.get("flood"), 50.0, "flood", lat, lng)
+        groundwater_val = cls._normalize(h.get("groundwater"), 50.0, "groundwater", lat, lng)
+        
+        # Include all 4 hydrology factors in average
+        cat_hydrology = (water_val + drainage_val + flood_val + groundwater_val) / 4
+        flood_safety = flood_val  # Keep separate for penalty logic
+
+        # --- 4. CLIMATIC (3 Factors) ---
+        c = raw.get("climatic", {})
+        cat_climatic = (
+
+@staticmethod
+def _get_drainage_default(is_coastal: bool, climate_zone: str) -> float:
+    """Dynamic drainage default based on coastal and climate factors."""
+    if is_coastal:
+        return 50.0  # Coastal areas often have drainage challenges
+
+    drainage_by_climate = {
+        "tropical": 45.0,    # High rainfall, drainage challenges
+        "subtropical": 55.0,  # Moderate drainage
+        "temperate": 65.0,    # Good drainage
+        "cool": 60.0,         # Moderate drainage
+        "polar": 70.0          # Good drainage (frozen ground)
+    }
+    return drainage_by_climate.get(climate_zone, 60.0)
+        water_body_name = None
+        if is_on_water and isinstance(water_details.get("details"), dict):
+            water_body_name = water_details.get("details", {}).get("name") or "identified water body"
+        elif is_on_water:
+            water_body_name = "identified water body"
+
+        # When on water: physical contribution = 0 (flat on water = flood prone, not suitable)
+        if is_on_water:
+            cat_physical = 0.0
+            cat_hydrology = 0.0
+            flood_safety = 0.0
+
+        # --- FINAL AGGREGATION ---
+        weights = {"phys": 0.2, "env": 0.2, "hydro": 0.2, "clim": 0.2, "socio": 0.2}
+        base_score = (
+            (cat_physical * weights["phys"]) +
+            (cat_environmental * weights["env"]) +
+            (cat_hydrology * weights["hydro"]) +
+            (cat_climatic * weights["clim"]) +
+            (cat_socio * weights["socio"])
+        )
+
+        # 🚨 MASTER PENALTY LOGIC
+        final_score = base_score
+        penalty_note = "None"
+        is_hard_unsuitable = False
+        label = "Highly Suitable" if final_score > 75 else "Suitable" if final_score > 40 else "High Risk"
+        water_body_snippet = None
+        protected_snippet = None
+
+        # Water Body — low score (not zero) so other factors still visible; label/snippet remain clear
+        if is_on_water:
+            final_score = min(final_score, 12.0)
+            penalty_note = "Non-Terrestrial (Open Water)"
+            is_hard_unsuitable = True
+            label = "Not Suitable (Water Body)"
+            water_body_snippet = water_body_name or "Open water"
+
+        # Flood Hazard Multiplier (only when not on water)
+        if not is_on_water and flood_safety < 40:
+            final_score *= 0.5
+            penalty_note = "High Flood Inundation Hazard"
+
+        # Forest/Protected Area — immediate detail and low score
+        if landuse_val <= 20:
+            final_score = min(final_score, 20.0)
+            penalty_note = "Protected Environmental Zone"
+            if not is_on_water:
+                label = "Not Suitable (Protected/Forest Area)"
+                protected_snippet = landuse_class if landuse_class and landuse_class != "Unknown" else "Protected zone"
+
+        flat_factors = {
+            "rainfall": cls._normalize(c.get("rainfall")),
+            "flood": flood_safety,
+            "landslide": slope_score,
+            "soil": cls._normalize(e.get("soil")),
+            "proximity": cls._normalize(s.get("infrastructure")),
+            "water": water_val,
+            "pollution": cls._normalize(e.get("pollution")),
+            "landuse": landuse_val
         }
-        return stress_by_climate.get(climate_zone, 50.0)
-    
-    @staticmethod
-    def _get_recovery_default(is_urban: str, region: str, climate_zone: str) -> float:
-        """Dynamic recovery capacity default based on context."""
-        if is_urban == "high":
-            return 70.0  # Better recovery in cities (resources)
-        elif is_urban == "medium":
-            return 55.0  # Moderate recovery in suburbs
-        else:
-            # Rural recovery by region
-            recovery_by_region = {
-                "north_america": 70.0,  # Good recovery capacity
-                "europe": 75.0,           # Excellent recovery capacity
-                "asia": 55.0,            # Variable recovery capacity
-                "south_america": 45.0,    # Moderate recovery capacity
-                "africa": 35.0,           # Limited recovery capacity
-                "oceania": 65.0,          # Good recovery capacity
-                "other": 50.0             # Unknown
-            }
-            return recovery_by_region.get(region, 50.0)
-    
-    @staticmethod
-    def _get_habitability_default(is_urban: str, region: str, climate_zone: str) -> float:
-        """Dynamic long-term habitability default based on context."""
-        # Habitability is better in temperate regions with good infrastructure
-        if is_urban == "high":
-            return 70.0  # Better habitability in cities
-        elif is_urban == "medium":
-            return 60.0  # Moderate habitability in suburbs
-        else:
-            # Rural habitability by climate
-            habitability_by_climate = {
-                "temperate": 80.0,    # Excellent habitability
-                "subtropical": 70.0,  # Good habitability
-                "cool": 75.0,         # Good habitability
-                "tropical": 50.0,      # Challenging habitability
-                "polar": 30.0          # Very challenging habitability
-            }
-            return habitability_by_climate.get(climate_zone, 50.0)
+
+        return {
+            "score": round(final_score, 1),
+            "label": label,
+            "is_hard_unsuitable": is_hard_unsuitable,
+            "water_body_snippet": water_body_snippet,
+            "protected_snippet": protected_snippet,
+            "category_scores": {
+                "physical": round(cat_physical, 1),
+                "environmental": round(cat_environmental, 1),
+                "hydrology": round(cat_hydrology, 1),
+                "climatic": round(cat_climatic, 1),
+                "socio_econ": round(cat_socio, 1)
+            },
+            "factors": flat_factors,
+            "penalty": penalty_note
+        }

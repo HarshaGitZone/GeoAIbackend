@@ -197,11 +197,20 @@ def get_cache_key(lat, lng):
     return f"{float(lat):.4f},{float(lng):.4f}"
 
 # --- ML Model Loading (optional; app works without .pkl files) ---
-# Same 14 factors and order as backend/ml/train_model.py (FACTOR_ORDER).
+# Same 23 factors and order as complete factor system (FACTOR_ORDER).
 ML_FACTOR_ORDER = [
-    "slope", "elevation", "flood", "water", "drainage",
-    "vegetation", "pollution", "soil", "rainfall", "thermal", "intensity",
+    # Physical (4)
+    "slope", "elevation", "ruggedness", "stability",
+    # Hydrology (4) 
+    "flood", "water", "drainage", "groundwater",
+    # Environmental (5)
+    "vegetation", "pollution", "soil", "biodiversity", "heat_island",
+    # Climatic (3)
+    "rainfall", "thermal", "intensity",
+    # Socio-Economic (3)
     "landuse", "infrastructure", "population",
+    # Risk & Resilience (4)
+    "multi_hazard", "climate_change", "recovery", "habitability"
 ]
 ML_MODELS = {}
 for name in ("model_rf.pkl", "model_xgboost.pkl", "model_gbm.pkl", "model_et.pkl", "model_lgbm.pkl"):
@@ -219,14 +228,14 @@ for name in ("model_rf.pkl", "model_xgboost.pkl", "model_gbm.pkl", "model_et.pkl
             print(f"Optional ML model {name} skipped: {e}")
 
 
-def _ml_14feature_vector(flat_factors):
-    """Build 14-feature vector (same order as train_model.py FACTOR_ORDER). flat_factors: dict of factor name -> 0-100."""
+def _ml_23feature_vector(flat_factors):
+    """Build 23-feature vector (same order as complete factor system). flat_factors: dict of factor name -> 0-100."""
     vals = []
     for k in ML_FACTOR_ORDER:
         v = flat_factors.get(k)
         if v is None and k == "infrastructure":
             v = flat_factors.get("proximity")
-        vals.append(float(v) if v is not None else 50.0)
+        vals.append(v if v is not None else 50)
     return np.array([vals], dtype=np.float64)
 
 
@@ -235,14 +244,14 @@ def _predict_suitability_ml(flat_factors):
     if not ML_MODELS:
         return None, False, None
     try:
-        feat = _ml_14feature_vector(flat_factors)
+        feat = _ml_23feature_vector(flat_factors)
         scores = []
         for name, model in ML_MODELS.items():
             # Handle different model types to avoid sklearn warnings
             if 'lgbm' in name.lower():
                 # LightGBM: create DataFrame with proper column names
                 import pandas as pd
-                feat_df = pd.DataFrame([feat], columns=ML_FACTOR_ORDER)
+                feat_df = pd.DataFrame([feat.flatten()], columns=ML_FACTOR_ORDER)
                 pred = model.predict(feat_df)
             else:
                 # Other models: use numpy array
@@ -2828,7 +2837,7 @@ def get_strategic_intelligence(current_factors, current_score):
 
 def _extract_flat_factors(factors: dict) -> dict:
     """
-    Flattens the nested 15-factor structure into a simple dict for ML (14 factors) and history analysis.
+    Flattens the nested 23-factor structure into a simple dict for ML and history analysis.
     """
     def _get_val(cat: str, key: str, fallback: float = 50.0) -> float:
         try:
@@ -2841,17 +2850,22 @@ def _extract_flat_factors(factors: dict) -> dict:
             return fallback
     
     return {
-        # Physical (2)
+        # Physical (4)
         "slope": _get_val("physical", "slope"),
         "elevation": _get_val("physical", "elevation"),
-        # Hydrology (3)
+        "ruggedness": _get_val("physical", "ruggedness"),
+        "stability": _get_val("physical", "stability"),
+        # Hydrology (4)
         "flood": _get_val("hydrology", "flood"),
         "water": _get_val("hydrology", "water"),
         "drainage": _get_val("hydrology", "drainage"),
-        # Environmental (3)
+        "groundwater": _get_val("hydrology", "groundwater"),
+        # Environmental (5)
         "vegetation": _get_val("environmental", "vegetation"),
         "pollution": _get_val("environmental", "pollution"),
         "soil": _get_val("environmental", "soil"),
+        "biodiversity": _get_val("environmental", "biodiversity"),
+        "heat_island": _get_val("environmental", "heat_island"),
         # Climatic (3)
         "rainfall": _get_val("climatic", "rainfall"),
         "thermal": _get_val("climatic", "thermal"),
@@ -2860,6 +2874,11 @@ def _extract_flat_factors(factors: dict) -> dict:
         "landuse": _get_val("socio_econ", "landuse"),
         "infrastructure": _get_val("socio_econ", "infrastructure"),
         "population": _get_val("socio_econ", "population"),
+        # Risk & Resilience (4)
+        "multi_hazard": _get_val("risk_resilience", "multi_hazard"),
+        "climate_change": _get_val("risk_resilience", "climate_change"),
+        "recovery": _get_val("risk_resilience", "recovery"),
+        "habitability": _get_val("risk_resilience", "habitability"),
         # Legacy mappings for ML model compatibility
         "landslide": _get_val("physical", "slope"),  # slope is proxy for landslide
         "proximity": _get_val("socio_econ", "infrastructure"),  # infrastructure is proximity
@@ -2882,7 +2901,7 @@ def get_history():
         # 1. Fetch CURRENT state baseline
         current_suitability = _perform_suitability_analysis(lat, lng)
         
-        # 2. Flatten factors and current category scores (5 categories)
+        # 2. Flatten factors and current category scores (6 categories)
         f = _extract_flat_factors(current_suitability['factors'])
         current_cat = current_suitability.get('category_scores') or {}
         current_physical = float(current_cat.get('physical', 50))
@@ -2890,6 +2909,7 @@ def get_history():
         current_hydrology = float(current_cat.get('hydrology', 50))
         current_climatic = float(current_cat.get('climatic', 50))
         current_socio = float(current_cat.get('socio_econ', 50))
+        current_risk = float(current_cat.get('risk_resilience', 50))  # Add Risk & Resilience
         
         # Define Year Mapping for different timelines
         year_map = {'1W': 2020, '1M': 2020, '1Y': 2017, '10Y': 2017}
@@ -2910,6 +2930,7 @@ def get_history():
             visual_multiplier = 1.5 if t_key == '1Y' else 1.0
             rev_mult = (1.0 - (decay_rate * offset * visual_multiplier))
             
+            # Calculate drifts for all factors with proper temporal logic
             p_prox = max(0, min(100, f.get('proximity', 50) * rev_mult))
             p_land = max(0, min(99.9, f.get('landuse', 50) / rev_mult))
             p_flood = max(0, min(100, f.get('flood', 50) * (1.0 + (decay_rate * offset * 0.5))))
@@ -2919,28 +2940,73 @@ def get_history():
             drift_thermal = round(offset * 0.5, 2)
             drift_population = round(offset * 3.0, 2)
             
+            # Add drifts for newly added factors
+            drift_ruggedness = round(offset * 0.3, 2)      # Terrain gets more challenging over time
+            drift_stability = round(offset * 0.4, 2)      # Stability decreases slightly over time
+            drift_groundwater = round(offset * 0.8, 2)    # Groundwater depletion over time
+            drift_biodiversity = round(-offset * 1.2, 2) # Biodiversity improves with conservation
+            drift_heat_island = round(offset * 1.0, 2)    # Urban heat increases over time
+            drift_multi_hazard = round(offset * 0.6, 2)   # Hazard exposure increases
+            drift_climate_change = round(offset * 0.7, 2) # Climate stress increases
+            drift_recovery = round(-offset * 0.5, 2)     # Recovery capacity improves with development
+            drift_habitability = round(-offset * 0.8, 2)   # Habitability improves with infrastructure
+            
             # Historical Weather Archive
             p_rain_mm = fetch_historical_weather_stats(lat, lng, int(offset) if offset >= 1 else 1)
             p_rain_score = max(0, min(100, 100 - (p_rain_mm / 10) if p_rain_mm < 800 else 20))
             
-            # Past category scores (same 5-category formula as Aggregator)
-            past_physical = (f.get('slope', 50) + f.get('elevation', 50)) / 2
-            past_environmental = (max(0, min(100, f.get('vegetation', 50) + drift_vegetation)) + p_soil + (f.get('pollution', 50) + drift_pollution)) / 3.0
-            past_hydrology = (f.get('water', 50) + f.get('drainage', 50)) / 2
-            past_climatic = (p_rain_score + (f.get('thermal', 50) + drift_thermal)) / 2
+            # Past category scores (same 6-category formula as Aggregator) - USE DRIFTS
+            past_physical = (f.get('slope', 50) + f.get('elevation', 50) + 
+                           max(0, min(100, f.get('ruggedness', 50) + drift_ruggedness)) + 
+                           max(0, min(100, f.get('stability', 50) - drift_stability))) / 4
+            past_environmental = (max(0, min(100, f.get('vegetation', 50) + drift_vegetation)) + p_soil + 
+                                 (f.get('pollution', 50) + drift_pollution) + 
+                                 max(0, min(100, f.get('biodiversity', 50) - drift_biodiversity)) + 
+                                 max(0, min(100, f.get('heat_island', 50) + drift_heat_island))) / 5.0
+            past_hydrology = (f.get('water', 50) + f.get('drainage', 50) + 
+                             max(0, min(100, f.get('groundwater', 50) - drift_groundwater))) / 3
+            past_climatic = (p_rain_score + (f.get('thermal', 50) + drift_thermal) + f.get('intensity', 50)) / 3
             past_socio = (p_prox + p_land + (f.get('population', 50) + drift_population)) / 3
-            p_score_rule = round((past_physical + past_environmental + past_hydrology + past_climatic + past_socio) / 5.0, 2)
-            # Use ML ensemble (14-factor) for p_score when any model is loaded
+            past_risk = (max(0, min(100, f.get('multi_hazard', 50) + drift_multi_hazard)) + 
+                        max(0, min(100, f.get('climate_change', 50) + drift_climate_change)) +
+                        max(0, min(100, f.get('recovery', 50) - drift_recovery)) + 
+                        max(0, min(100, f.get('habitability', 50) - drift_habitability))) / 4
+            p_score_rule = round((past_physical + past_environmental + past_hydrology + past_climatic + past_socio + past_risk) / 6.0, 2)
+            
+            # Use ML ensemble (23-factor) for p_score when any model is loaded
             p_pollution = max(0, min(100, f.get('pollution', 50) + drift_pollution))
             p_vegetation = max(0, min(100, f.get('vegetation', 50) + drift_vegetation))
             p_thermal = max(0, min(100, f.get('thermal', 50) + drift_thermal))
             p_population = max(0, min(100, f.get('population', 50) + drift_population))
+            
+            # Calculate past values for all factors using drifts
+            p_ruggedness = max(0, min(100, f.get('ruggedness', 50) + drift_ruggedness))
+            p_stability = max(0, min(100, f.get('stability', 50) - drift_stability))
+            p_groundwater = max(0, min(100, f.get('groundwater', 50) - drift_groundwater))
+            p_biodiversity = max(0, min(100, f.get('biodiversity', 50) - drift_biodiversity))
+            p_heat_island = max(0, min(100, f.get('heat_island', 50) + drift_heat_island))
+            p_multi_hazard = max(0, min(100, f.get('multi_hazard', 50) + drift_multi_hazard))
+            p_climate_change = max(0, min(100, f.get('climate_change', 50) + drift_climate_change))
+            p_recovery = max(0, min(100, f.get('recovery', 50) - drift_recovery))
+            p_habitability = max(0, min(100, f.get('habitability', 50) - drift_habitability))
+            
             past_flat = {
+                # Physical (4)
                 "slope": f.get('slope', 50), "elevation": f.get('elevation', 50),
+                "ruggedness": p_ruggedness, "stability": p_stability,
+                # Hydrology (4)
                 "flood": p_flood, "water": f.get('water', 50), "drainage": f.get('drainage', 50),
+                "groundwater": p_groundwater,
+                # Environmental (5)
                 "vegetation": p_vegetation, "pollution": p_pollution, "soil": p_soil,
+                "biodiversity": p_biodiversity, "heat_island": p_heat_island,
+                # Climatic (3)
                 "rainfall": p_rain_score, "thermal": p_thermal, "intensity": f.get('intensity', 50),
+                # Socio-Economic (3)
                 "landuse": p_land, "infrastructure": p_prox, "population": p_population,
+                # Risk & Resilience (4)
+                "multi_hazard": p_multi_hazard, "climate_change": p_climate_change,
+                "recovery": p_recovery, "habitability": p_habitability,
             }
             p_score_ml, ml_used, score_source_ml = _predict_suitability_ml(past_flat)
             p_score = p_score_ml if ml_used else p_score_rule
@@ -2953,21 +3019,28 @@ def get_history():
 
             # Drifts: historical_value - current_value (so negative drift = current improved)
             drifts = {
+                # Physical (4)
+                "slope": 0.0, "elevation": 0.0, 
+                "ruggedness": drift_ruggedness, "stability": -drift_stability,
+                # Hydrology (4)
                 "rainfall": round(p_rain_score - f.get('rainfall', 50), 2),
-                "flood": round(p_flood - f.get('flood', 50), 2),
-                "slope": 0.0,
-                "elevation": 0.0,
+                "flood": round(p_flood - f.get('flood', 50), 2), "water": 0.0, "drainage": 0.0,
+                "groundwater": -drift_groundwater,
+                # Environmental (5)
                 "soil": round(p_soil - f.get('soil', 50), 2),
+                "pollution": drift_pollution,
+                "vegetation": drift_vegetation,
+                "biodiversity": -drift_biodiversity, "heat_island": drift_heat_island,
+                # Climatic (3)
+                "thermal": drift_thermal, "intensity": round(offset * 0.8, 2),
+                # Socio-Economic (3)
                 "proximity": round(p_prox - f.get('proximity', 50), 2),
                 "infrastructure": round(p_prox - f.get('proximity', 50), 2),
-                "water": 0.0,
-                "drainage": 0.0,
-                "pollution": round(drift_pollution, 2),
                 "landuse": round(p_land - f.get('landuse', 50), 2),
-                "vegetation": round(drift_vegetation, 2),
-                "thermal": round(drift_thermal, 2),
-                "intensity": round(offset * 0.8, 2),
-                "population": round(drift_population, 2),
+                "population": drift_population,
+                # Risk & Resilience (4)
+                "multi_hazard": drift_multi_hazard, "climate_change": drift_climate_change,
+                "recovery": -drift_recovery, "habitability": -drift_habitability,
             }
 
             # category_scores_past (past_* already computed above for p_score)
@@ -2977,6 +3050,7 @@ def get_history():
                 "hydrology": round(past_hydrology, 1),
                 "climatic": round(past_climatic, 1),
                 "socio_econ": round(past_socio, 1),
+                "risk_resilience": round(past_risk, 1),  # Add Risk & Resilience
             }
             category_drifts = {
                 "physical": round(current_physical - past_physical, 1),
@@ -2984,11 +3058,12 @@ def get_history():
                 "hydrology": round(current_hydrology - past_hydrology, 1),
                 "climatic": round(current_climatic - past_climatic, 1),
                 "socio_econ": round(current_socio - past_socio, 1),
+                "risk_resilience": round(current_risk - past_risk, 1),  # Add Risk & Resilience
             }
 
             history_bundle[t_key] = {
                 "score": p_score,
-                "score_source": score_source_ml if ml_used else "Rule-based (5 categories)",
+                "score_source": score_source_ml if ml_used else "Rule-based (6 categories)",
                 "velocity": {
                     "score": round(velocity_score, 2),
                     "label": "Hyper-Growth" if velocity_score > 7 else "Expanding" if velocity_score > 3 else "Stable"
@@ -3000,6 +3075,52 @@ def get_history():
                 "drifts": drifts,
                 "category_scores": category_scores_past,
                 "category_drifts": category_drifts,
+                # Add complete factors_meta for historical evidence display
+                "explanation": {
+                    "factors_meta": {
+                        # Physical (4)
+                        "physical": {
+                            "slope": {"value": f.get('slope', 50), "evidence": f"Slope: {f.get('slope', 50)}/100. Historical terrain analysis."},
+                            "elevation": {"value": f.get('elevation', 50), "evidence": f"Elevation: {f.get('elevation', 50)}/100. Historical elevation data."},
+                            "ruggedness": {"value": p_ruggedness, "evidence": f"Terrain Ruggedness: {p_ruggedness:.1f}/100. Historical terrain difficulty."},
+                            "stability": {"value": p_stability, "evidence": f"Ground Stability: {p_stability:.1f}/100. Historical stability assessment."}
+                        },
+                        # Hydrology (4)
+                        "hydrology": {
+                            "flood": {"value": p_flood, "evidence": f"Flood Risk: {p_flood:.1f}/100. Historical flood analysis."},
+                            "water": {"value": f.get('water', 50), "evidence": f"Water Access: {f.get('water', 50)}/100. Historical water resources."},
+                            "drainage": {"value": f.get('drainage', 50), "evidence": f"Drainage: {f.get('drainage', 50)}/100. Historical drainage capacity."},
+                            "groundwater": {"value": p_groundwater, "evidence": f"Groundwater: {p_groundwater:.1f}/100. Historical groundwater levels."}
+                        },
+                        # Environmental (5)
+                        "environmental": {
+                            "vegetation": {"value": p_vegetation, "evidence": f"Vegetation: {p_vegetation:.1f}/100. Historical vegetation cover."},
+                            "pollution": {"value": p_pollution, "evidence": f"Air Pollution: {p_pollution:.1f}/100. Historical pollution levels."},
+                            "soil": {"value": p_soil, "evidence": f"Soil Quality: {p_soil:.1f}/100. Historical soil conditions."},
+                            "biodiversity": {"value": p_biodiversity, "evidence": f"Biodiversity: {p_biodiversity:.1f}/100. Historical ecosystem diversity."},
+                            "heat_island": {"value": p_heat_island, "evidence": f"Heat Island: {p_heat_island:.1f}/100. Historical urban heat effects."}
+                        },
+                        # Climatic (3)
+                        "climatic": {
+                            "rainfall": {"value": p_rain_score, "evidence": f"Rainfall: {p_rain_score:.1f}/100. Historical precipitation patterns."},
+                            "thermal": {"value": p_thermal, "evidence": f"Thermal Comfort: {p_thermal:.1f}/100. Historical temperature analysis."},
+                            "intensity": {"value": f.get('intensity', 50), "evidence": f"Heat Stress: {f.get('intensity', 50)}/100. Historical heat stress data."}
+                        },
+                        # Socio-Economic (3)
+                        "socio_econ": {
+                            "landuse": {"value": p_land, "evidence": f"Land Use: {p_land:.1f}/100. Historical land development."},
+                            "infrastructure": {"value": p_prox, "evidence": f"Infrastructure: {p_prox:.1f}/100. Historical infrastructure access."},
+                            "population": {"value": p_population, "evidence": f"Population Density: {p_population:.1f}/100. Historical population data."}
+                        },
+                        # Risk & Resilience (4)
+                        "risk_resilience": {
+                            "multi_hazard": {"value": p_multi_hazard, "evidence": f"Multi-Hazard Risk: {p_multi_hazard:.1f}/100. Historical hazard exposure."},
+                            "climate_change": {"value": p_climate_change, "evidence": f"Climate Change: {p_climate_change:.1f}/100. Historical climate impacts."},
+                            "recovery": {"value": p_recovery, "evidence": f"Recovery Capacity: {p_recovery:.1f}/100. Historical recovery capabilities."},
+                            "habitability": {"value": p_habitability, "evidence": f"Habitability: {p_habitability:.1f}/100. Historical living conditions."}
+                        }
+                    }
+                }
             }
             
             history_bundle[t_key]["visual_forensics"] = get_visual_forensics(lat, lng, year_map[t_key])
@@ -3153,21 +3274,36 @@ def suitability():
 
         # 4. ALIGN CLASSIFICATION (Updated for 15-Factor Nested Structure)
         # Use vegetation + landuse + infra + pollution so Visual Intelligence matches factor scores
-        f = result['factors']
+        # f = result['factors']
         
-        # Enhanced 15-factor cross-check for more accurate land classification
-        vegetation_score = f.get('vegetation', {}).get('score', 50)
-        landuse_score = f.get('landuse', {}).get('score', 50)
-        infra_score = f.get('infrastructure', {}).get('score', 50)
-        poll_score = f.get('pollution', {}).get('score', 50)
-        slope_score = f.get('slope', {}).get('score', 50)
-        water_score = f.get('water', {}).get('score', 50)
-        flood_score = f.get('flood', {}).get('score', 50)
-        drainage_score = f.get('drainage', {}).get('score', 50)
-        soil_score = f.get('soil', {}).get('score', 50)
-        rainfall_score = f.get('rainfall', {}).get('score', 50)
-        thermal_score = f.get('thermal', {}).get('score', 50)
-        pop_score = f.get('population', {}).get('score', 50)
+        # # Enhanced 15-factor cross-check for more accurate land classification
+        # vegetation_score = f.get('vegetation', {}).get('score', 50)
+        # landuse_score = f.get('landuse', {}).get('score', 50)
+        # infra_score = f.get('infrastructure', {}).get('score', 50)
+        # poll_score = f.get('pollution', {}).get('score', 50)
+        # slope_score = f.get('slope', {}).get('score', 50)
+        # water_score = f.get('water', {}).get('score', 50)
+        # flood_score = f.get('flood', {}).get('score', 50)
+        # drainage_score = f.get('drainage', {}).get('score', 50)
+        # soil_score = f.get('soil', {}).get('score', 50)
+        # rainfall_score = f.get('rainfall', {}).get('score', 50)
+        # thermal_score = f.get('thermal', {}).get('score', 50)
+        # pop_score = f.get('population', {}).get('score', 50)
+        ff = result["factors"]
+
+        vegetation_score = ff["environmental"]["vegetation"]["value"]
+        landuse_score     = ff["socio_econ"]["landuse"]["value"]
+        infra_score       = ff["socio_econ"]["infrastructure"]["value"]
+        poll_score        = ff["environmental"]["pollution"]["value"]
+        slope_score       = ff["physical"]["slope"]["value"]
+        water_score       = ff["hydrology"]["water"]["value"]
+        flood_score       = ff["hydrology"]["flood"]["value"]
+        drainage_score    = ff["hydrology"]["drainage"]["value"]
+        soil_score        = ff["environmental"]["soil"]["value"]
+        rainfall_score    = ff["climatic"]["rainfall"]["value"]
+        thermal_score     = ff["climatic"]["thermal"]["value"]
+        pop_score         = ff["socio_econ"]["population"]["value"]
+
         
         # Sophisticated multi-factor classification logic
         inferred_class = "Mixed land use"
@@ -3557,82 +3693,121 @@ def suitability():
 #             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S IST"),
 #             "location": {"latitude": latitude, "longitude": longitude}
 #         }
+# def build_factor_evidence(f):
+#     return {
+#         "physical": {
+#             "slope": {
+#                 "value": f['physical']['slope']['value'],
+#                 "unit": "%",
+#                 "label": f['physical']['slope'].get("label", "Slope evaluated"),
+#                 "source": f['physical']['slope']['source'],
+#             },
+#             "elevation": {
+#                 "value": f['physical']['elevation']['value'],
+#                 "unit": "m",
+#                 "label": f['physical']['elevation'].get("label", "Elevation level"),
+#                 "source": f['physical']['elevation']['source'],
+#             }
+#         },
+
+#         "hydrology": {
+#             "flood": {
+#                 "value": f['hydrology']['flood']['value'],
+#                 "label": f['hydrology']['flood'].get("label", "Flood safety index"),
+#                 "source": f['hydrology']['flood']['source'],
+#             },
+#             "water_proximity": {
+#                 "distance_km": f['hydrology']['water'].get("distance_km"),
+#                 "score": f['hydrology']['water']['value'],
+#                 "source": f['hydrology']['water']['source'],
+#             }
+#         },
+
+#         "climatic": {
+#             "rainfall": {
+#                 "annual_mm": f['climatic']['rainfall']['raw'],
+#                 "score": f['climatic']['rainfall']['value'],
+#                 "label": f['climatic']['rainfall'].get("label", "Rainfall regime"),
+#                 "source": f['climatic']['rainfall']['source'],
+#             },
+#             "thermal_comfort": {
+#                 "index": f['climatic']['thermal']['value'],
+#                 "label": f['climatic']['thermal'].get("label", "Thermal comfort"),
+#                 "source": f['climatic']['thermal']['source'],
+#             }
+#         },
+
+#         "environmental": {
+#             "vegetation": {
+#                 "ndvi": f['environmental']['vegetation'].get("raw"),
+#                 "score": f['environmental']['vegetation']['value'],
+#                 "label": f['environmental']['vegetation'].get("label", "Vegetation health"),
+#                 "source": f['environmental']['vegetation']['source'],
+#             },
+#             "pollution": {
+#                 "pm25": f['environmental']['pollution']['raw'],
+#                 "score": f['environmental']['pollution']['value'],
+#                 "label": f['environmental']['pollution'].get("label", "Air quality"),
+#                 "source": f['environmental']['pollution']['source'],
+#             }
+#         },
+
+#         "socio_econ": {
+#             "landuse": {
+#                 "classification": f['socio_econ']['landuse'].get("classification"),
+#                 "score": f['socio_econ']['landuse']['value'],
+#                 "source": f['socio_econ']['landuse']['source'],
+#             },
+#             "infrastructure": {
+#                 "score": f['socio_econ']['infrastructure']['value'],
+#                 "source": f['socio_econ']['infrastructure']['source'],
+#             },
+#             "population": {
+#                 "density": f['socio_econ']['population'].get("raw"),
+#                 "score": f['socio_econ']['population']['value'],
+#                 "source": f['socio_econ']['population']['source'],
+#             }
+#         }
+#     }
 def build_factor_evidence(f):
     return {
         "physical": {
-            "slope": {
-                "value": f['physical']['slope']['value'],
-                "unit": "%",
-                "label": f['physical']['slope'].get("label", "Slope evaluated"),
-                "source": f['physical']['slope']['source'],
-            },
-            "elevation": {
-                "value": f['physical']['elevation']['value'],
-                "unit": "m",
-                "label": f['physical']['elevation'].get("label", "Elevation level"),
-                "source": f['physical']['elevation']['source'],
-            }
+            "slope": f["physical"]["slope"],
+            "elevation": f["physical"]["elevation"],
+            "ruggedness": f["physical"]["ruggedness"],
+            "stability": f["physical"]["stability"],
         },
-
         "hydrology": {
-            "flood": {
-                "value": f['hydrology']['flood']['value'],
-                "label": f['hydrology']['flood'].get("label", "Flood safety index"),
-                "source": f['hydrology']['flood']['source'],
-            },
-            "water_proximity": {
-                "distance_km": f['hydrology']['water'].get("distance_km"),
-                "score": f['hydrology']['water']['value'],
-                "source": f['hydrology']['water']['source'],
-            }
+            "flood": f["hydrology"]["flood"],
+            "water": f["hydrology"]["water"],
+            "drainage": f["hydrology"]["drainage"],
+            "groundwater": f["hydrology"]["groundwater"],
         },
-
-        "climatic": {
-            "rainfall": {
-                "annual_mm": f['climatic']['rainfall']['raw'],
-                "score": f['climatic']['rainfall']['value'],
-                "label": f['climatic']['rainfall'].get("label", "Rainfall regime"),
-                "source": f['climatic']['rainfall']['source'],
-            },
-            "thermal_comfort": {
-                "index": f['climatic']['thermal']['value'],
-                "label": f['climatic']['thermal'].get("label", "Thermal comfort"),
-                "source": f['climatic']['thermal']['source'],
-            }
-        },
-
         "environmental": {
-            "vegetation": {
-                "ndvi": f['environmental']['vegetation'].get("raw"),
-                "score": f['environmental']['vegetation']['value'],
-                "label": f['environmental']['vegetation'].get("label", "Vegetation health"),
-                "source": f['environmental']['vegetation']['source'],
-            },
-            "pollution": {
-                "pm25": f['environmental']['pollution']['raw'],
-                "score": f['environmental']['pollution']['value'],
-                "label": f['environmental']['pollution'].get("label", "Air quality"),
-                "source": f['environmental']['pollution']['source'],
-            }
+            "vegetation": f["environmental"]["vegetation"],
+            "pollution": f["environmental"]["pollution"],
+            "soil": f["environmental"]["soil"],
+            "biodiversity": f["environmental"]["biodiversity"],
+            "heat_island": f["environmental"]["heat_island"],
         },
-
+        "climatic": {
+            "rainfall": f["climatic"]["rainfall"],
+            "thermal": f["climatic"]["thermal"],
+            "intensity": f["climatic"]["intensity"],
+        },
         "socio_econ": {
-            "landuse": {
-                "classification": f['socio_econ']['landuse'].get("classification"),
-                "score": f['socio_econ']['landuse']['value'],
-                "source": f['socio_econ']['landuse']['source'],
-            },
-            "infrastructure": {
-                "score": f['socio_econ']['infrastructure']['value'],
-                "source": f['socio_econ']['infrastructure']['source'],
-            },
-            "population": {
-                "density": f['socio_econ']['population'].get("raw"),
-                "score": f['socio_econ']['population']['value'],
-                "source": f['socio_econ']['population']['source'],
-            }
+            "landuse": f["socio_econ"]["landuse"],
+            "infrastructure": f["socio_econ"]["infrastructure"],
+            "population": f["socio_econ"]["population"],
+        },
+        "risk_resilience": {
+            "multi_hazard": f["risk_resilience"]["multi_hazard"],
+            "climate_change": f["risk_resilience"]["climate_change"],
+            "recovery": f["risk_resilience"]["recovery"],
+            "habitability": f["risk_resilience"]["habitability"],
         }
     }
+
 def normalize_factor(factor: dict, *, default_value=50.0):
     """
     Enforces a strict schema for all factors.
@@ -3683,7 +3858,7 @@ def normalize_factor(factor: dict, *, default_value=50.0):
 def _generate_evidence_text(factor_name: str, factor_data: dict, raw_factors: dict) -> str:
     """
     Generates detailed human-readable evidence text for each factor.
-    Similar to the old 8-factor format but for all 15 factors.
+    Complete evidence generation for all 23 factors across 6 categories.
     """
     val = factor_data.get("value")
     raw = factor_data.get("raw")
@@ -3785,21 +3960,31 @@ def _generate_evidence_text(factor_name: str, factor_data: dict, raw_factors: di
         return f"Vegetation index: {val}/100. {label}. From satellite soil moisture; score reflects vegetation proxy band."
     
     elif factor_name == "pollution":
+        details = factor_data.get("details") or {}
         pm25 = factor_data.get("raw") or raw
+        no2 = details.get("no2")
+        so2 = details.get("so2")
+        
         if pm25 is not None:
-            who_annual, who_24h = 10, 35
+            evidence_parts = [f"PM2.5: {pm25} µg/m³"]
+            if no2 is not None: evidence_parts.append(f"NO₂: {no2} µg/m³")
+            if so2 is not None: evidence_parts.append(f"SO₂: {so2} µg/m³")
+            
+            stats_str = ", ".join(evidence_parts)
+            
             if pm25 < 10:
-                return f"PM2.5: {pm25} µg/m³ (measured). EXCELLENT. Below WHO annual ({who_annual} µg/m³). Score {val}/100 reflects <10 band — optimal for residential."
+                return f"{stats_str}. EXCELLENT air quality. Below WHO limits. Indicates low population density or effective green cover. Score {val}/100."
             elif pm25 < 25:
-                return f"PM2.5: {pm25} µg/m³. GOOD. Acceptable for residential/commercial. WHO 24h = {who_24h}. Score {val}/100 reflects 10–25 band."
+                return f"{stats_str}. GOOD air quality. Typical of suburban or well-managed urban areas. Score {val}/100."
             elif pm25 < 50:
-                return f"PM2.5: {pm25} µg/m³. MODERATE; exceeds WHO. Industrial/traffic possible. Score {val}/100 reflects 25–50 band."
+                pop_context = "High NO₂ (>25 µg/m³) indicates high population density/traffic." if (no2 and no2 > 25) else "Moderate particulate matter."
+                return f"{stats_str}. MODERATE pollution. {pop_context} Score {val}/100."
             elif pm25 < 100:
-                return f"PM2.5: {pm25} µg/m³. POOR; exceeds standards. Air filtration recommended. Score {val}/100 reflects 50–100 band."
+                return f"{stats_str}. POOR air quality. High urban activity or industrial presence detected. Score {val}/100."
             else:
-                return f"PM2.5: {pm25} µg/m³. HAZARDOUS. Severe health risk. Score {val}/100 reflects >100 band."
+                return f"{stats_str}. HAZARDOUS. Critical pollution levels. Unsuitable for residential use without mitigation. Score {val}/100."
         else:
-            return f"Air quality score: {val}/100. From regional/satellite baseline (no local PM2.5)."
+            return f"Air quality score: {val}/100. Estimated from regional baseline."
     
     elif factor_name == "soil":
         if val is not None:
@@ -3920,8 +4105,191 @@ def _generate_evidence_text(factor_name: str, factor_data: dict, raw_factors: di
                 return f"Heat stress index: {val}/100. EXTREME. Avg max {raw_temp}°C. Significant thermal management needed. Score reflects >65 band."
         return f"Thermal intensity: {val}/100. {label}. 7-day max temperature forecast."
     
+    # Missing Physical Factors
+    elif factor_name == "ruggedness":
+        if val is not None:
+            if val >= 80:
+                return f"Terrain ruggedness: {val}/100. LOW ruggedness. Smooth terrain, easy development. Score reflects 80–100 band."
+            elif val >= 60:
+                return f"Terrain ruggedness: {val}/100. MODERATE ruggedness. Some terrain variation. Score reflects 60–80 band."
+            elif val >= 40:
+                return f"Terrain ruggedness: {val}/100. HIGH ruggedness. Challenging terrain. Score reflects 40–60 band."
+            else:
+                return f"Terrain ruggedness: {val}/100. VERY HIGH ruggedness. Extremely difficult terrain. Score reflects <40 band."
+        return f"Terrain ruggedness: {val}/100. {label}. Surface roughness and terrain complexity."
+    
+    elif factor_name == "stability":
+        if val is not None:
+            if val >= 80:
+                return f"Ground stability: {val}/100. HIGH stability. Low landslide/erosion risk. Score reflects 80–100 band."
+            elif val >= 60:
+                return f"Ground stability: {val}/100. MODERATE stability. Some instability concerns. Score reflects 60–80 band."
+            elif val >= 40:
+                return f"Ground stability: {val}/100. LOW stability. Significant instability risk. Score reflects 40–60 band."
+            else:
+                return f"Ground stability: {val}/100. VERY LOW stability. High landslide/erosion risk. Score reflects <40 band."
+        return f"Ground stability: {val}/100. {label}. Geological stability and erosion resistance."
+    
+    # Missing Hydrology Factor
+    elif factor_name == "groundwater":
+        if val is not None:
+            if val >= 80:
+                return f"Groundwater availability: {val}/100. EXCELLENT. Abundant groundwater resources. Score reflects 80–100 band."
+            elif val >= 60:
+                return f"Groundwater availability: {val}/100. GOOD. Adequate groundwater supply. Score reflects 60–80 band."
+            elif val >= 40:
+                return f"Groundwater availability: {val}/100. POOR. Limited groundwater. Score reflects 40–60 band."
+            else:
+                return f"Groundwater availability: {val}/100. VERY POOR. Scarce groundwater. Score reflects <40 band."
+        return f"Groundwater assessment: {val}/100. {label}. Subsurface water availability and quality."
+    
+    # Missing Environmental Factors
+    elif factor_name == "biodiversity":
+        if val is not None:
+            if val >= 80:
+                return f"Biodiversity: {val}/100. HIGH biodiversity. Rich ecosystem services. Score reflects 80–100 band."
+            elif val >= 60:
+                return f"Biodiversity: {val}/100. MODERATE biodiversity. Balanced ecosystem. Score reflects 60–80 band."
+            elif val >= 40:
+                return f"Biodiversity: {val}/100. LOW biodiversity. Limited ecosystem diversity. Score reflects 40–60 band."
+            else:
+                return f"Biodiversity: {val}/100. VERY LOW biodiversity. Poor ecosystem health. Score reflects <40 band."
+        return f"Biodiversity assessment: {val}/100. {label}. Ecosystem diversity and health."
+    
+    elif factor_name == "heat_island":
+        if val is not None:
+            if val >= 80:
+                return f"Heat island effect: {val}/100. LOW heat island. Cool microclimate. Score reflects 80–100 band."
+            elif val >= 60:
+                return f"Heat island effect: {val}/100. MODERATE heat island. Some urban heat effect. Score reflects 60–80 band."
+            elif val >= 40:
+                return f"Heat island effect: {val}/100. HIGH heat island. Significant urban warming. Score reflects 40–60 band."
+            else:
+                return f"Heat island effect: {val}/100. VERY HIGH heat island. Extreme urban heat effect. Score reflects <40 band."
+        return f"Heat island assessment: {val}/100. {label}. Urban heat island intensity and impact."
+    
+    # Risk & Resilience Factors
+    elif factor_name == "multi_hazard":
+        if val is not None:
+            if val >= 80:
+                return f"Multi-hazard risk: {val}/100. LOW risk. Minimal exposure to floods, heat, erosion. Score reflects 80–100 band."
+            elif val >= 60:
+                return f"Multi-hazard risk: {val}/100. MODERATE risk. Some exposure to natural hazards. Score reflects 60–80 band."
+            elif val >= 40:
+                return f"Multi-hazard risk: {val}/100. HIGH risk. Significant hazard exposure. Score reflects 40–60 band."
+            else:
+                return f"Multi-hazard risk: {val}/100. VERY HIGH risk. Multiple hazard threats. Score reflects <40 band."
+        return f"Multi-hazard assessment: {val}/100. {label}. Composite risk from floods, heat waves, and erosion."
+    
+    elif factor_name == "climate_change":
+        if val is not None:
+            if val >= 80:
+                return f"Climate change resilience: {val}/100. HIGH resilience. Low climate stress exposure. Score reflects 80–100 band."
+            elif val >= 60:
+                return f"Climate change resilience: {val}/100. MODERATE resilience. Some climate adaptation needed. Score reflects 60–80 band."
+            elif val >= 40:
+                return f"Climate change resilience: {val}/100. LOW resilience. Significant climate vulnerability. Score reflects 40–60 band."
+            else:
+                return f"Climate change resilience: {val}/100. VERY LOW resilience. High climate change impact. Score reflects <40 band."
+        return f"Climate change assessment: {val}/100. {label}. Long-term climate stress and adaptation capacity."
+    
+    elif factor_name == "recovery":
+        if val is not None:
+            if val >= 80:
+                return f"Recovery capacity: {val}/100. EXCELLENT. Strong infrastructure and emergency response. Score reflects 80–100 band."
+            elif val >= 60:
+                return f"Recovery capacity: {val}/100. GOOD. Adequate recovery systems. Score reflects 60–80 band."
+            elif val >= 40:
+                return f"Recovery capacity: {val}/100. POOR. Limited recovery capabilities. Score reflects 40–60 band."
+            else:
+                return f"Recovery capacity: {val}/100. VERY POOR. Minimal recovery infrastructure. Score reflects <40 band."
+        return f"Recovery capacity: {val}/100. {label}. Ability to recover from disasters and disruptions."
+    
+    elif factor_name == "habitability":
+        if val is not None:
+            if val >= 80:
+                return f"Long-term habitability: {val}/100. EXCELLENT. Sustainable living conditions. Score reflects 80–100 band."
+            elif val >= 60:
+                return f"Long-term habitability: {val}/100. GOOD. Viable long-term settlement. Score reflects 60–80 band."
+            elif val >= 40:
+                return f"Long-term habitability: {val}/100. POOR. Challenging living conditions. Score reflects 40–60 band."
+            else:
+                return f"Long-term habitability: {val}/100. VERY POOR. Unsustainable for long-term living. Score reflects <40 band."
+        return f"Long-term habitability: {val}/100. {label}. Sustainability of long-term human settlement."
+
     return f"Score: {val}/100. {label}."
 
+
+def fetch_realtime_pollution(lat, lng):
+    """
+    Fetches real-time air quality data from Open-Meteo Air Quality API.
+    Returns a dictionary compatible with the factor structure.
+    """
+    try:
+        url = "https://air-quality-api.open-meteo.com/v1/air-quality"
+        params = {
+            "latitude": lat,
+            "longitude": lng,
+            "current": ["pm10", "pm2_5", "nitrogen_dioxide", "sulphur_dioxide", "ozone", "carbon_monoxide"],
+            "timezone": "auto"
+        }
+        response = requests.get(url, params=params, timeout=5)
+        data = response.json()
+        
+        current = data.get("current", {})
+        
+        pm2_5 = current.get("pm2_5")
+        pm10 = current.get("pm10")
+        no2 = current.get("nitrogen_dioxide")
+        so2 = current.get("sulphur_dioxide")
+        o3 = current.get("ozone")
+        co = current.get("carbon_monoxide")
+        
+        # Dynamic Scoring Logic
+        # Priority: PM2.5 (Health) > NO2 (Traffic/Population) > SO2 (Industry)
+        
+        score = 100
+        
+        # PM2.5 Penalty (Base Health Metric)
+        if pm2_5 is not None:
+            if pm2_5 <= 5: score = 100      # Pristine
+            elif pm2_5 <= 10: score = 90    # WHO Guideline
+            elif pm2_5 <= 25: score = 75    # Moderate
+            elif pm2_5 <= 50: score = 50    # Unhealthy
+            elif pm2_5 <= 75: score = 30    # Severe
+            else: score = 10                # Hazardous
+            
+        # NO2 Penalty (Urban/Traffic Indicator)
+        # High NO2 (>40 µg/m³) indicates high population density/traffic
+        if no2 is not None:
+            if no2 > 40: score -= 15
+            elif no2 > 25: score -= 5
+            
+        # SO2 Penalty (Industrial Indicator)
+        if so2 is not None and so2 > 20:
+            score -= 10
+            
+        score = max(0, min(100, score))
+        
+        return {
+            "value": score,
+            "raw": pm2_5, # Keep PM2.5 as primary raw for compatibility
+            "details": {
+                "pm2_5": pm2_5,
+                "pm10": pm10,
+                "no2": no2,
+                "so2": so2,
+                "o3": o3,
+                "co": co
+            },
+            "source": "Open-Meteo Air Quality API (Real-time)",
+            "label": "Atmospheric Composition Analysis",
+            "confidence": "High"
+        }
+
+    except Exception as e:
+        logger.error(f"Pollution Fetch Error: {e}")
+        return None
 
 def _generate_slope_verdict(slope_percent):
     """Generate terrain verdict based on slope percentage"""
@@ -3944,10 +4312,16 @@ def _generate_slope_verdict(slope_percent):
 def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
     """
     MASTER INTEGRATION ENGINE
-    Recruits 15 factors across 5 categories and attaches high-fidelity reasoning.
+    Recruits 23 factors across 6 categories and attaches high-fidelity reasoning.
     """
-    # 1. 🚀 RECRUIT ALL 15 FACTORS (The New Architecture)
+    # 1. 🚀 RECRUIT ALL 23 FACTORS (The Complete Architecture)
     intelligence = GeoDataService.get_land_intelligence(latitude, longitude)
+    
+    # --- DYNAMIC POLLUTION OVERRIDE ---
+    real_pollution = fetch_realtime_pollution(latitude, longitude)
+    if real_pollution:
+        intelligence["raw_factors"]["environmental"]["pollution"] = real_pollution
+    # ----------------------------------
     
     # 2. 📊 COMPUTE CATEGORIZED SCORES
     agg_result = Aggregator.compute_suitability_score(intelligence)
@@ -3965,16 +4339,21 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
         "physical": {
             "slope": normalize_factor(raw["physical"]["slope"]),
             "elevation": normalize_factor(raw["physical"]["elevation"]),
+            "ruggedness": normalize_factor(raw["physical"].get("ruggedness", {})),
+            "stability": normalize_factor(raw["physical"].get("stability", {})),
         },
         "hydrology": {
             "flood": normalize_factor(raw["hydrology"]["flood"]),
             "water": normalize_factor(raw["hydrology"]["water"]),
             "drainage": normalize_factor(raw["hydrology"].get("drainage", {})),
+            "groundwater": normalize_factor(raw["hydrology"].get("groundwater", {})),
         },
         "environmental": {
             "vegetation": normalize_factor(raw["environmental"]["vegetation"]),
             "pollution": normalize_factor(raw["environmental"]["pollution"]),
             "soil": normalize_factor(raw["environmental"]["soil"]),
+            "biodiversity": normalize_factor(raw["environmental"].get("biodiversity", {})),
+            "heat_island": normalize_factor(raw["environmental"].get("heat_island", {})),
         },
         "climatic": {
             "rainfall": normalize_factor(raw["climatic"]["rainfall"]),
@@ -3985,23 +4364,34 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
             "landuse": normalize_factor(raw["socio_econ"]["landuse"]),
             "infrastructure": normalize_factor(raw["socio_econ"]["infrastructure"]),
             "population": normalize_factor(raw["socio_econ"]["population"]),
+        },
+        "risk_resilience": {
+            "multi_hazard": normalize_factor(raw["risk_resilience"].get("multi_hazard", {})),
+            "climate_change": normalize_factor(raw["risk_resilience"].get("climate_change", {})),
+            "recovery": normalize_factor(raw["risk_resilience"].get("recovery", {})),
+            "habitability": normalize_factor(raw["risk_resilience"].get("habitability", {})),
         }
     }
 
-    # 4. 📝 GENERATE EVIDENCE TEXT FOR EACH FACTOR (ALL 15)
-    # Physical (2)
+    # 4. 📝 GENERATE EVIDENCE TEXT FOR EACH FACTOR (ALL 23)
+    # Physical (4)
     f["physical"]["slope"]["evidence"] = _generate_evidence_text("slope", f["physical"]["slope"], raw)
     f["physical"]["elevation"]["evidence"] = _generate_evidence_text("elevation", f["physical"]["elevation"], raw)
+    f["physical"]["ruggedness"]["evidence"] = _generate_evidence_text("ruggedness", f["physical"]["ruggedness"], raw)
+    f["physical"]["stability"]["evidence"] = _generate_evidence_text("stability", f["physical"]["stability"], raw)
     
-    # Hydrology (3)
+    # Hydrology (4)
     f["hydrology"]["flood"]["evidence"] = _generate_evidence_text("flood", f["hydrology"]["flood"], raw)
     f["hydrology"]["water"]["evidence"] = _generate_evidence_text("water", raw["hydrology"]["water"], raw)
     f["hydrology"]["drainage"]["evidence"] = _generate_evidence_text("drainage", f["hydrology"]["drainage"], raw)
+    f["hydrology"]["groundwater"]["evidence"] = _generate_evidence_text("groundwater", f["hydrology"]["groundwater"], raw)
     
-    # Environmental (3)
+    # Environmental (5)
     f["environmental"]["vegetation"]["evidence"] = _generate_evidence_text("vegetation", f["environmental"]["vegetation"], raw)
     f["environmental"]["pollution"]["evidence"] = _generate_evidence_text("pollution", f["environmental"]["pollution"], raw)
     f["environmental"]["soil"]["evidence"] = _generate_evidence_text("soil", f["environmental"]["soil"], raw)
+    f["environmental"]["biodiversity"]["evidence"] = _generate_evidence_text("biodiversity", f["environmental"]["biodiversity"], raw)
+    f["environmental"]["heat_island"]["evidence"] = _generate_evidence_text("heat_island", f["environmental"]["heat_island"], raw)
     
     # Climatic (3)
     f["climatic"]["rainfall"]["evidence"] = _generate_evidence_text("rainfall", f["climatic"]["rainfall"], raw)
@@ -4012,6 +4402,12 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
     f["socio_econ"]["landuse"]["evidence"] = _generate_evidence_text("landuse", raw["socio_econ"]["landuse"], raw)
     f["socio_econ"]["infrastructure"]["evidence"] = _generate_evidence_text("infrastructure", raw["socio_econ"]["infrastructure"], raw)
     f["socio_econ"]["population"]["evidence"] = _generate_evidence_text("population", f["socio_econ"]["population"], raw)
+    
+    # Risk & Resilience (4)
+    f["risk_resilience"]["multi_hazard"]["evidence"] = _generate_evidence_text("multi_hazard", f["risk_resilience"]["multi_hazard"], raw)
+    f["risk_resilience"]["climate_change"]["evidence"] = _generate_evidence_text("climate_change", f["risk_resilience"]["climate_change"], raw)
+    f["risk_resilience"]["recovery"]["evidence"] = _generate_evidence_text("recovery", f["risk_resilience"]["recovery"], raw)
+    f["risk_resilience"]["habitability"]["evidence"] = _generate_evidence_text("habitability", f["risk_resilience"]["habitability"], raw)
 
     # 5. 📂 GEOSPATIAL PASSPORT (location summary for UI / reports)
     slope_raw = raw.get("physical", {}).get("slope", {})
@@ -4086,10 +4482,26 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
                         "evidence": f["physical"]["elevation"]["evidence"],
                         "source": f["physical"]["elevation"].get("source", "NASA SRTM"),
                         "confidence": f["physical"]["elevation"].get("confidence", "High")
+                    },
+                    "ruggedness": {
+                        "value": f["physical"]["ruggedness"]["value"],
+                        "unit": f["physical"]["ruggedness"].get("unit", "index"),
+                        "label": f["physical"]["ruggedness"].get("label"),
+                        "evidence": f["physical"]["ruggedness"]["evidence"],
+                        "source": f["physical"]["ruggedness"].get("source", "Terrain Analysis"),
+                        "confidence": f["physical"]["ruggedness"].get("confidence", "Medium")
+                    },
+                    "stability": {
+                        "value": f["physical"]["stability"]["value"],
+                        "unit": f["physical"]["stability"].get("unit", "index"),
+                        "label": f["physical"]["stability"].get("label"),
+                        "evidence": f["physical"]["stability"]["evidence"],
+                        "source": f["physical"]["stability"].get("source", "Geological Survey"),
+                        "confidence": f["physical"]["stability"].get("confidence", "Medium")
                     }
                 },
 
-                # Hydrology (3 factors)
+                # Hydrology (4 factors)
                 "hydrology": {
                     "flood": {
                         "value": f["hydrology"]["flood"]["value"],
@@ -4111,6 +4523,14 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
                         "evidence": f["hydrology"]["drainage"]["evidence"],
                         "source": f["hydrology"]["drainage"].get("source", "HydroSHEDS"),
                         "confidence": f["hydrology"]["drainage"].get("confidence", "Medium")
+                    },
+                    "groundwater": {
+                        "value": f["hydrology"]["groundwater"]["value"],
+                        "unit": f["hydrology"]["groundwater"].get("unit", "index"),
+                        "label": f["hydrology"]["groundwater"].get("label"),
+                        "evidence": f["hydrology"]["groundwater"]["evidence"],
+                        "source": f["hydrology"]["groundwater"].get("source", "Groundwater Survey"),
+                        "confidence": f["hydrology"]["groundwater"].get("confidence", "Medium")
                     }
                 },
 
@@ -4136,6 +4556,22 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
                         "evidence": f["environmental"]["soil"]["evidence"],
                         "source": f["environmental"]["soil"].get("source", "Regional Soil Model"),
                         "confidence": f["environmental"]["soil"].get("confidence", "Medium")
+                    },
+                    "biodiversity": {
+                        "value": f["environmental"]["biodiversity"]["value"],
+                        "unit": f["environmental"]["biodiversity"].get("unit", "index"),
+                        "label": f["environmental"]["biodiversity"].get("label"),
+                        "evidence": f["environmental"]["biodiversity"]["evidence"],
+                        "source": f["environmental"]["biodiversity"].get("source", "Biodiversity Database"),
+                        "confidence": f["environmental"]["biodiversity"].get("confidence", "Medium")
+                    },
+                    "heat_island": {
+                        "value": f["environmental"]["heat_island"]["value"],
+                        "unit": f["environmental"]["heat_island"].get("unit", "index"),
+                        "label": f["environmental"]["heat_island"].get("label"),
+                        "evidence": f["environmental"]["heat_island"]["evidence"],
+                        "source": f["environmental"]["heat_island"].get("source", "Urban Heat Analysis"),
+                        "confidence": f["environmental"]["heat_island"].get("confidence", "Medium")
                     }
                 },
 
@@ -4189,6 +4625,42 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
                         "evidence": f["socio_econ"]["population"]["evidence"],
                         "source": f["socio_econ"]["population"].get("source", "WorldPop"),
                         "confidence": f["socio_econ"]["population"].get("confidence", "Medium")
+                    }
+                },
+                
+                # Risk & Resilience
+                "risk_resilience": {
+                    "multi_hazard": {
+                        "value": f["risk_resilience"]["multi_hazard"]["value"],
+                        "unit": f["risk_resilience"]["multi_hazard"].get("unit", "index"),
+                        "label": f["risk_resilience"]["multi_hazard"].get("label"),
+                        "evidence": f["risk_resilience"]["multi_hazard"]["evidence"],
+                        "source": f["risk_resilience"]["multi_hazard"].get("source", "Multi-Hazard Assessment"),
+                        "confidence": f["risk_resilience"]["multi_hazard"].get("confidence", "Medium")
+                    },
+                    "climate_change": {
+                        "value": f["risk_resilience"]["climate_change"]["value"],
+                        "unit": f["risk_resilience"]["climate_change"].get("unit", "index"),
+                        "label": f["risk_resilience"]["climate_change"].get("label"),
+                        "evidence": f["risk_resilience"]["climate_change"]["evidence"],
+                        "source": f["risk_resilience"]["climate_change"].get("source", "Climate Impact Analysis"),
+                        "confidence": f["risk_resilience"]["climate_change"].get("confidence", "Medium")
+                    },
+                    "recovery": {
+                        "value": f["risk_resilience"]["recovery"]["value"],
+                        "unit": f["risk_resilience"]["recovery"].get("unit", "index"),
+                        "label": f["risk_resilience"]["recovery"].get("label"),
+                        "evidence": f["risk_resilience"]["recovery"]["evidence"],
+                        "source": f["risk_resilience"]["recovery"].get("source", "Recovery Capacity Assessment"),
+                        "confidence": f["risk_resilience"]["recovery"].get("confidence", "Medium")
+                    },
+                    "habitability": {
+                        "value": f["risk_resilience"]["habitability"]["value"],
+                        "unit": f["risk_resilience"]["habitability"].get("unit", "index"),
+                        "label": f["risk_resilience"]["habitability"].get("label"),
+                        "evidence": f["risk_resilience"]["habitability"]["evidence"],
+                        "source": f["risk_resilience"]["habitability"].get("source", "Habitability Analysis"),
+                        "confidence": f["risk_resilience"]["habitability"].get("confidence", "Medium")
                     }
                 }
             }

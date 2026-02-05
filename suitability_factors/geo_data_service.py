@@ -415,10 +415,46 @@ class GeoDataService:
                 "unit": "people/km²"
             }
 
+        # Import the new physical terrain factors
+        from .physical_terrain.terrain_ruggedness import get_terrain_ruggedness
+        from .physical_terrain.land_stability import get_land_stability
+        
+        # Import the new environmental factors
+        from .environmental.biodiversity_index import get_biodiversity_sensitivity
+        from .environmental.heat_island_potential import get_heat_island_potential
+        
+        # Import the new hydrology factor
+        from .hydrology.groundwater_recharge import get_groundwater_recharge_potential
+        
+        # Import the updated infrastructure factor
+        from .socio_econ.infrastructure_proximity import get_infrastructure_proximity
+        
+        # Import the new Risk & Resilience factors
+        from .risk_resilience.multi_hazard_risk import get_multi_hazard_risk
+        from .risk_resilience.climate_change_stress import get_climate_change_stress
+        from .risk_resilience.recovery_capacity import get_recovery_capacity
+        from .risk_resilience.long_term_habitability import get_long_term_habitability
+        
+        # Get all the new factor data
+        ruggedness_data = get_terrain_ruggedness(lat, lng)
+        stability_data = get_land_stability(lat, lng)
+        biodiversity_data = get_biodiversity_sensitivity(lat, lng)
+        heat_island_data = get_heat_island_potential(lat, lng)
+        groundwater_data = get_groundwater_recharge_potential(lat, lng)
+        infrastructure_data = get_infrastructure_proximity(lat, lng)
+        
+        # Get Risk & Resilience data
+        multi_hazard_data = get_multi_hazard_risk(lat, lng)
+        climate_change_data = get_climate_change_stress(lat, lng)
+        recovery_data = get_recovery_capacity(lat, lng)
+        habitability_data = get_long_term_habitability(lat, lng)
+
         raw_results = {
             "physical": {
                 "slope": slope_data,
-                "elevation": elevation_data_water if is_on_water else get_elevation_data(lat, lng)
+                "elevation": elevation_data_water if is_on_water else get_elevation_data(lat, lng),
+                "ruggedness": ruggedness_data,
+                "stability": stability_data
             },
             "environmental": {
                 "vegetation": get_ndvi_data(lat, lng),
@@ -430,7 +466,9 @@ class GeoDataService:
                     "value": pollution_score,
                     "pm25": pm25,
                     "details": pollution_details
-                }
+                },
+                "biodiversity": biodiversity_data,
+                "heat_island": heat_island_data
             },
             "hydrology": {
                 "flood": {
@@ -439,7 +477,8 @@ class GeoDataService:
                     "inputs": hydrology_ctx
                 },
                 "water": water_data,
-                "drainage": drainage_data
+                "drainage": drainage_data,
+                "groundwater": groundwater_data
             },
             "climatic": {
                 "rainfall": rainfall_data,
@@ -447,13 +486,15 @@ class GeoDataService:
                 "intensity": get_thermal_intensity(lat, lng)
             },
             "socio_econ": {
-                # "infrastructure": get_infrastructure_score(lat, lng),
                 "infrastructure": infrastructure_data,
-                # "landuse": infer_landuse_score(lat, lng),
                 "landuse": landuse_data,
-                # "population": get_population_data(lat, lng)
                 "population": population_data
-
+            },
+            "risk_resilience": {
+                "multi_hazard": multi_hazard_data,
+                "climate_change": climate_change_data,
+                "recovery": recovery_data,
+                "habitability": habitability_data
             }
         }
 

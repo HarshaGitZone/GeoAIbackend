@@ -37,20 +37,13 @@ PROJECT_KNOWLEDGE = {
     "description": "A high-precision terrain synthesis engine using satellite multispectral data and AI for predictive land analysis. Evaluates land for construction, farming, and safety using 14 factors across 5 categories with advanced ML models and comprehensive geospatial intelligence.",
     "team": {
         "guide": "Dr. G. Naga Chandrika",
-        "team_lead": "Harsha vardhan Botlagunta",
-        "team_lead_portfolio": "https://harshavardhanbotlagunta.netlify.app/",
         "members": [
             "Adepu Vaishnavi",
             "Chinni Jyothika", 
             "Harsha vardhan Botlagunta",
             "Maganti Pranathi"
         ],
-        "roles": {
-            "Harsha vardhan Botlagunta": "Team Lead",
-            "Adepu Vaishnavi": "Frontend Development",
-            "Chinni Jyothika": "Machine Learning Models",
-            "Maganti Pranathi": "Geospatial Analysis"
-        }
+     
     },
     "development_methodology": {
         "approach": "Agile Development with 2-week sprints",
@@ -610,7 +603,7 @@ You are **GeoGPT**, the official AI of **{pk['project_name']}** (version {pk['ve
 - Provide **SWOT analysis** for location comparisons
 - Use **visual hierarchy** with emojis and formatting
 - **Answer ANY question** about the project comprehensively and accurately
-- **CRITICAL**: NEVER use fake names or make up team members. Only use the actual team: Harsha vardhan Botlagunta (Team Lead), Adepu Vaishnavi, Chinni Jyothika, Maganti Pranathi, and Dr. G. Naga Chandrika (Guide)
+- **CRITICAL**: NEVER use fake names or make up team members. Only use the actual team: Harsha vardhan Botlagunta, Adepu Vaishnavi, Chinni Jyothika, Maganti Pranathi, and Dr. G. Naga Chandrika (Guide)
 - **CRITICAL**: Only provide factual information about the actual GeoAI project implementation
 - **CRITICAL**: Do not invent or fabricate any project details, team information, or technical specifications
 - **CRITICAL**: When asked about team, ALWAYS provide the exact team members listed above
@@ -1129,7 +1122,7 @@ class GeoAIAssistant:
         question_lower = question.lower()
         
         # Explicit team question detection
-        if any(term in question_lower for term in ["team", "team members", "team lead", "project guide", "who are", "who is", "developers", "mentor", "team information"]):
+        if any(term in question_lower for term in ["team", "team members", "project guide", "who are", "who is", "developers", "mentor", "team information"]):
             return {"question_type": "team"}
         elif any(term in question_lower for term in ["main lead", "lead developer", "project lead", "who led", "shaped this project"]):
             return {"question_type": "main_lead"}
@@ -1151,25 +1144,16 @@ class GeoAIAssistant:
         question_lower = question.lower()
         
         # Explicit team question response
-        if any(term in question_lower for term in ["team", "team members", "team lead", "project guide", "who are", "who is", "developers", "mentor"]):
+        if any(term in question_lower for term in ["team", "team members",  "project guide", "who are", "who is", "developers", "mentor"]):
             content = """### 👥 Official GeoAI Team Information
 
-**👨‍🏫 Project Guide:**
-- **Dr. G. Naga Chandrika** - Project mentor and technical advisor (GUIDE, NOT LEAD)
 
-**👑‍💻 Team Lead:**
-- **Harsha vardhan Botlagunta** - Team Lead, Backend Development, API Integration, Project Architecture
-- **Portfolio**: [Visit Portfolio]({pk['team']['team_lead_portfolio']})
 
-**👩‍💻 Development Team:**
-- **Adepu Vaishnavi** - Frontend Development, UI/UX Design
-- **Chinni Jyothika** - Machine Learning Models, Data Analysis
-- **Harsha vardhan Botlagunta** - Backend Development, Project Architecture (Team Lead)
-- **Maganti Pranathi** - Geospatial Analysis, GIS Integration
+
 
 **🚨 IMPORTANT**: 
-- **Main Lead**: Harsha vardhan Botlagunta (NOT Dr. G. Naga Chandrika)
-- **Project Guide**: Dr. G. Naga Chandrika (GUIDE ONLY, NOT LEAD)
+
+- **Project Guide**: Dr. G. Naga Chandrika (GUIDE )
 - These are the ONLY team members. The GeoAI project was developed by exactly 4 developers under the guidance of Dr. G. Naga Chandrika.
 
 **📋 Project Overview:**
@@ -1183,8 +1167,7 @@ This is the complete and accurate team information for the GeoAI project."""
         elif any(term in question_lower for term in ["main lead", "lead developer", "project lead", "who led", "shaped this project"]):
             content = """### 🎯 Project Leadership - GeoAI Land Suitability Intelligence
 
-**👑‍💻 Main Project Lead:**
-**Harsha vardhan Botlagunta** is the main lead who shaped the GeoAI project to its current state.
+
 
 **🔧 Leadership Contributions:**
 - Led the complete project architecture and design
@@ -1215,7 +1198,6 @@ The project represents a comprehensive geospatial intelligence platform that com
             content = """Hello! I'm GeoGPT Intelligence. What would you like to know about our geospatial intelligence platform?
 
 **👥 Official Team:**
-- **Team Lead**: Harsha vardhan Botlagunta
 - **Project Guide**: Dr. G. Naga Chandrika
 - **Team Members**: Adepu Vaishnavi, Chinni Jyothika, Maganti Pranathi
 
