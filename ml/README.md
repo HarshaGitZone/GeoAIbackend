@@ -2,8 +2,8 @@ GeoAI ML training (optional)
 
 The app works without these models (rule-based Aggregator + GeoDataService). When present, trained models are used in **main Suitability** (ml_score, score_source_ml) and **History Analysis** (past score per timeline).
 
-**train_model.py** – 14-factor ensemble (same factors as app aggregator):
-- Factors: slope, elevation, flood, water, drainage, vegetation, pollution, soil, rainfall, thermal, intensity, landuse, infrastructure, population
+**train_model.py** – 23-factor ensemble (same factors as app aggregator):
+- Factors: slope, elevation, ruggedness, stability, flood, water, drainage, groundwater, vegetation, pollution, soil, biodiversity, heat_island, rainfall, thermal, intensity, landuse, infrastructure, population, multi_hazard, climate_change, recovery, habitability (6 categories: Physical, Environmental, Hydrology, Climatic, Socio-Economic, Risk & Resilience)
 - Models: Random Forest, XGBoost, Gradient Boosting, Extra Trees, optional LightGBM
 - Labels: formula-derived 0–100 matching aggregator (5 categories + water/flood/landuse penalties)
 - Saves: `model_rf.pkl`, `model_xgboost.pkl`, `model_gbm.pkl`, `model_et.pkl`, `model_lgbm.pkl` (any that train successfully)

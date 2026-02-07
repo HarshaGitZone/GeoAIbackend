@@ -34,7 +34,7 @@ class AIResponse:
 PROJECT_KNOWLEDGE = {
     "project_name": "GeoAI Land Suitability Intelligence",
     "version": "4.0 (Comprehensive AI Assistant)",
-    "description": "A high-precision terrain synthesis engine using satellite multispectral data and AI for predictive land analysis. Evaluates land for construction, farming, and safety using 14 factors across 5 categories with advanced ML models and comprehensive geospatial intelligence.",
+    "description": "A high-precision terrain synthesis engine using satellite multispectral data and AI for predictive land analysis. Evaluates land for construction, farming, and safety using 23 factors across 6 categories with advanced ML models and comprehensive geospatial intelligence.",
     "team": {
         "guide": "Dr. G. Naga Chandrika",
         "members": [
@@ -158,7 +158,7 @@ PROJECT_KNOWLEDGE = {
                 "reg_alpha": 0.1,
                 "reg_lambda": 1.0
             },
-            "features_used": ["All 14 factors across 5 categories"],
+            "features_used": ["All 23 factors across 6 categories"],
             "training_data": "15,000+ location analyses with comprehensive factor data",
             "accuracy": "91.3%",
             "training_objective": "Binary:logistic for suitability classification",
@@ -220,14 +220,14 @@ PROJECT_KNOWLEDGE = {
     "stack": {
         "frontend": "React.js, Leaflet, MapLibre GL (2D/3D), Framer Motion, TailwindCSS, Lucide-React",
         "backend": "Python Flask with AI integration (OpenAI Primary, Groq Backup)",
-        "ml_models": "Ensemble: Random Forest, XGBoost, Gradient Boosting, Extra Trees (14-factor suitability); CNN-based visual forensics; Temporal analysis models; Used in main suitability (ml_score) and History Analysis (past score, factor drift, category drift).",
+        "ml_models": "Ensemble: Random Forest, XGBoost, Gradient Boosting, Extra Trees (23-factor suitability); CNN-based visual forensics; Temporal analysis models; Used in main suitability (ml_score) and History Analysis (past score, factor drift, category drift).",
         "apis": "Open-Meteo (Weather), OpenStreetMap (POI/water), OpenAQ (Air Quality), MapTiler (tiles/terrain), Elevation APIs, Satellite Imagery services"
     },
     "features": {
         "three_cards": "1) Suitability (score, 15 factors, radar, evidence, detailed breakdown). 2) Locational Intelligence (weather, geospatial passport, CNN classification, telemetry, nearby amenities). 3) Strategic Utility (site potential, development roadmaps, interventions, 2030 forecast, risk assessment).",
         "history": "Analyze History Trends opens timeline (1W, 1M, 1Y, 10Y) with factor drift, category drift, visual forensics (SIAM-CNN), GeoGPT 2030 planning forecast, terrain reconstruction archive, and comprehensive temporal analysis.",
         "comparison": "Compare Location B: side-by-side suitability, factor comparison, PDF report with both locations, SWOT analysis, recommendation matrix.",
-        "factors_14": "slope, elevation, flood, water, drainage, vegetation, pollution, soil, rainfall, thermal, intensity, landuse, infrastructure, population (5 categories: Physical, Environmental, Hydrology, Climatic, Socio-Economic).",
+        "factors_23": "slope, elevation, ruggedness, stability, flood, water, drainage, groundwater, vegetation, pollution, soil, biodiversity, heat_island, rainfall, thermal, intensity, landuse, infrastructure, population, multi_hazard, climate_change, recovery, habitability (6 categories: Physical, Environmental, Hydrology, Climatic, Socio-Economic, Risk & Resilience).",
         "advanced": "CNN visual forensics, temporal drift analysis, 2030 predictive planning, terrain reconstruction, satellite image comparison, risk modeling, development impact assessment."
     },
     "capabilities": {
@@ -267,7 +267,7 @@ def generate_system_prompt(location_name, current_data, compare_data=None):
     
     # No analysis: full project context so GeoGPT can answer anything about the app
     if not current_data:
-        return f"""🚨🚨🚨 **IMMEDIATE INSTRUCTION**: If user asks about team, main lead, or project guide, you MUST respond with:
+        return f"""🚨🚨🚨 **IMMEDIATE INSTRUCTION**: If user asks about team, or project guide, you MUST respond with:
 
 **👑‍💻 Main Lead**: Harsha vardhan Botlagunta
 **👨‍🏫 Project Guide**: Dr. G. Naga Chandrika (GUIDE ONLY, NOT LEAD)
@@ -275,7 +275,7 @@ def generate_system_prompt(location_name, current_data, compare_data=None):
 
 🚨 **DO NOT** say "team is led by Dr. G. Naga Chandrika" - she is the GUIDE
 🚨 **DO NOT** say "context does not explicitly state" - you have complete team information above.
-🚨 **ALWAYS** provide Harsha vardhan Botlagunta as the main lead.
+
 
 You are **GeoGPT**, the official AI of **{pk['project_name']}** (version {pk['version']}).
 
@@ -417,8 +417,8 @@ You are **GeoGPT**, the official AI of **{pk['project_name']}** (version {pk['ve
 **⚖️ Location Comparison:**
 {pk['features']['comparison']}
 
-**🔢 14 Evaluation Factors:**
-{pk['features']['factors_14']}
+**🔢 23 Evaluation Factors:**
+{pk['features']['factors_23']}
 
 **🔬 Advanced Capabilities:**
 {pk['features']['advanced']}
@@ -450,7 +450,7 @@ You are **GeoGPT**, the official AI of **{pk['project_name']}** (version {pk['ve
 - **Accessibility**: WCAG compliance with keyboard navigation and screen reader support
 
 **📊 Data Visualization:**
-- **14-Factor Radar Chart**: Comprehensive suitability analysis visualization
+- **23-Factor Radar Chart**: Comprehensive suitability analysis visualization
 - **Category Breakdown**: 5-category analysis with detailed scoring
 - **Historical Trends**: Time-series analysis with factor drift detection
 - **3D Terrain Models**: Interactive elevation and slope visualization
@@ -471,7 +471,7 @@ You are **GeoGPT**, the official AI of **{pk['project_name']}** (version {pk['ve
 ### 📈 COMPLETE FEATURE COUNT & BREAKDOWN
 
 **🎯 Core Features (12 Major):**
-1. **Land Suitability Analysis** - 14-factor comprehensive scoring
+1. **Land Suitability Analysis** - 23-factor comprehensive scoring
 2. **3D Terrain Visualization** - Interactive 3D maps with MapLibre GL
 3. **Historical Analysis** - Temporal trend analysis with factor drift
 4. **Site Comparison** - Side-by-side location analysis
@@ -541,7 +541,7 @@ You are **GeoGPT**, the official AI of **{pk['project_name']}** (version {pk['ve
 
 **🎯 General Project Questions:**
 • Explain how the GeoAI system works and its methodology
-• Describe the 14 factors and how they're calculated
+• Describe the 23 factors and how they're calculated
 • Explain the ML models and their accuracy
 • Detail the APIs used for data collection
 • Provide technical documentation and usage instructions
@@ -626,7 +626,7 @@ Keep answers comprehensive, technically accurate, and well-structured!"""
 • **🎯 Location:** {location_name}
 • **📊 Status:** {status_emoji} Suitability **{score_a}/100**
 • **📈 Category Scores:** {category_scores}
-• **🔢 Factors (14):** {factors_a}
+• **🔢 Factors (23):** {factors_a}
 • **⛰️ Terrain:** {terrain_a}
 • **🌤️ Weather:** {weather_a}
 • **⚖️ Comparison Mode:** {is_comparing}
@@ -1172,7 +1172,7 @@ This is the complete and accurate team information for the GeoAI project."""
 
 **📊 Project Achievements Under Leadership:**
 - Successfully integrated 6 different ML models (CNN, Random Forest, XGBoost, SVM, Gradient Boosting, Extra Trees)
-- Implemented comprehensive 14-factor land suitability analysis
+- Implemented comprehensive 23-factor land suitability analysis
 - Created 3D terrain visualization with MapLibre GL
 - Built real-time geospatial intelligence system
 - Developed responsive frontend with React.js

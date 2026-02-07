@@ -93,7 +93,7 @@ Climatic (3 factors):      Rainfall, Thermal, Intensity
 Socio-Economic (3 factors): Infrastructure, Landuse, Population
 ```
 
-### **After (19 factors):**
+### **After (23 factors):**
 ```
 Physical (4 factors):     Slope, Elevation, Ruggedness, Stability ← NEW!
 Environmental (5 factors): Vegetation, Soil, Pollution, Biodiversity, Heat Island ← NEW!

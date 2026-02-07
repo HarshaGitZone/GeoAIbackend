@@ -233,49 +233,106 @@ def _get_service_accessibility(lat: float, lng: float) -> Dict[str, Any]:
     except Exception:
         return {"score": 30.0, "service_types": {}, "total_services": 0, "source": "Default"}
 
+# def _calculate_infrastructure_proximity(nearest_road: Dict, urban_centers: List[Dict], 
+#                                        public_transport: Dict, services: Dict) -> float:
+#     """
+#     Calculate comprehensive infrastructure proximity index.
+#     Higher values = better proximity = higher suitability.
+#     """
+    
+#     # Road accessibility factor (30%)
+#     road_distance = nearest_road.get("distance_km", 10.0)
+#     road_score = max(0, 100 - (road_distance * 10))  # Closer = higher score
+    
+#     # Urban center proximity factor (40%)
+#     if urban_centers:
+#         # Weighted by population and travel time
+#         center_scores = []
+#         for center in urban_centers:
+#             # Population weight (larger cities are more important)
+#             population_weight = min(1.0, center.get("population", 1000000) / 1000000)
+#             # Travel time penalty (longer travel = lower score)
+#             travel_penalty = max(0, 100 - center.get("travel_time_minutes", 60))
+#             center_score = (population_weight * 50 + travel_penalty * 50) / 100
+#             center_scores.append(center_score)
+        
+#         urban_score = sum(center_scores) / len(center_scores) if center_scores else 0
+#     else:
+#         urban_score = 0
+    
+#     # Public transport factor (20%)
+#     transport_score = public_transport.get("score", 30)
+    
+#     # Service accessibility factor (10%)
+#     service_score = services.get("score", 30)
+    
+#     # Combined proximity index
+#     proximity_index = (
+#         road_score * 0.30 +
+#         urban_score * 0.40 +
+#         transport_score * 0.20 +
+#         service_score * 0.10
+#     )
+    
+#     return min(100.0, proximity_index)
+# def _calculate_infrastructure_proximity(nearest_road: Dict, urban_centers: List[Dict], 
+#                                        public_transport: Dict, services: Dict) -> float:
+#     """
+#     Holistic Accessibility Index: Rewards the 'Valencia Mix'.
+#     Valencia/Dubai score 100 because they have all 4 categories in one spot.
+#     """
+#     # 1. Road Access (25%) - Closer is better
+#     road_dist = nearest_road.get("distance_km", 10.0)
+#     road_score = max(0, 100 - (road_dist * 5)) # Much more forgiving than before
+
+#     # 2. Market & Service Density (35%) - CRITICAL UPDATE
+#     # Counts malls, markets, and shops instead of just 'amenities'
+#     service_score = min(100.0, services.get("total_services", 0) * 4) 
+
+#     # 3. Public Transport Hubs (25%)
+#     transport_score = min(100.0, public_transport.get("transport_options", 0) * 15)
+
+#     # 4. Urban Hub Proximity (15%)
+#     urban_score = 0
+#     if urban_centers:
+#         # Distance to the absolute nearest city center
+#         nearest_city_dist = urban_centers[0].get("distance_km", 50)
+#         urban_score = max(0, 100 - (nearest_city_dist * 2))
+
+#     # Combined Index
+#     proximity_index = (road_score * 0.25) + (service_score * 0.35) + (transport_score * 0.25) + (urban_score * 0.15)
+    
+#     return min(100.0, proximity_index)
 def _calculate_infrastructure_proximity(nearest_road: Dict, urban_centers: List[Dict], 
                                        public_transport: Dict, services: Dict) -> float:
     """
-    Calculate comprehensive infrastructure proximity index.
-    Higher values = better proximity = higher suitability.
+    Strict evidence-based proximity index.
     """
-    
-    # Road accessibility factor (30%)
-    road_distance = nearest_road.get("distance_km", 10.0)
-    road_score = max(0, 100 - (road_distance * 10))  # Closer = higher score
-    
-    # Urban center proximity factor (40%)
-    if urban_centers:
-        # Weighted by population and travel time
-        center_scores = []
-        for center in urban_centers:
-            # Population weight (larger cities are more important)
-            population_weight = min(1.0, center.get("population", 1000000) / 1000000)
-            # Travel time penalty (longer travel = lower score)
-            travel_penalty = max(0, 100 - center.get("travel_time_minutes", 60))
-            center_score = (population_weight * 50 + travel_penalty * 50) / 100
-            center_scores.append(center_score)
-        
-        urban_score = sum(center_scores) / len(center_scores) if center_scores else 0
-    else:
-        urban_score = 0
-    
-    # Public transport factor (20%)
-    transport_score = public_transport.get("score", 30)
-    
-    # Service accessibility factor (10%)
-    service_score = services.get("score", 30)
-    
-    # Combined proximity index
-    proximity_index = (
-        road_score * 0.30 +
-        urban_score * 0.40 +
-        transport_score * 0.20 +
-        service_score * 0.10
-    )
-    
-    return min(100.0, proximity_index)
+    # 1. Road Score (Max 25)
+    road_dist = nearest_road.get("distance_km", 10.0)
+    # If road is further than 5km, this contributes almost 0
+    road_score = max(0, 25 - (road_dist * 5)) 
 
+    # 2. Service/Market Score (Max 40)
+    # Requires actual counts to gain points.
+    service_count = services.get("total_services", 0)
+    service_score = min(40.0, service_count * 4) 
+
+    # 3. Transport Score (Max 20)
+    transport_count = public_transport.get("transport_options", 0)
+    transport_score = min(20.0, transport_count * 5)
+
+    # 4. Urban Hub Proximity (Max 15)
+    urban_score = 0
+    if urban_centers:
+        dist = urban_centers[0].get("distance_km", 50)
+        urban_score = max(0, 15 - (dist * 0.5))
+
+    # FINAL AGGREGATE: 25+40+20+15 = 100
+    # If all inputs are zero, score is 0.
+    proximity_index = road_score + service_score + transport_score + urban_score
+    
+    return round(min(100.0, proximity_index), 2)
 def _proximity_to_suitability(proximity_index: float) -> float:
     """
     Convert proximity index to suitability score.

@@ -68,8 +68,29 @@ def get_thermal_intensity(lat: float, lng: float) -> Dict:
 
         avg_max_temp = sum(temps) / len(temps)
 
-        # Heat stress transformation (transparent, linear)
-        intensity = max(0.0, min(100.0, (avg_max_temp - 18.0) * 4.0))
+        # FIXED: Heat stress scoring - optimal temperature gets highest score
+        # Optimal range: 18-28°C gets highest scores (80-100)
+        # Too cold (<18°C) or too hot (>28°C) gets lower scores
+        if 18 <= avg_max_temp <= 28:
+            # Optimal temperature range - high scores
+            base_score = 100.0
+            if avg_max_temp < 20:
+                # Slightly cool, still good
+                score = base_score - ((20 - avg_max_temp) * 2)
+            elif avg_max_temp > 26:
+                # Getting warm, slightly lower score
+                score = base_score - ((avg_max_temp - 26) * 3)
+            else:
+                # Perfect temperature range
+                score = base_score
+        elif avg_max_temp < 18:
+            # Too cold - decreasing scores
+            score = max(20, 80 - ((18 - avg_max_temp) * 4))
+        else:
+            # Too hot - rapidly decreasing scores
+            score = max(10, 90 - ((avg_max_temp - 28) * 5))
+        
+        intensity = max(0.0, min(100.0, score))
         intensity = round(intensity, 2)
 
         return {
