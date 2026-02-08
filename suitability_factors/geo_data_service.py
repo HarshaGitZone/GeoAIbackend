@@ -101,7 +101,7 @@ from .Climatic.thermal_comfort import get_thermal_comfort_analysis
 from .Climatic.thermal_intensity import get_thermal_intensity
 
 # 📂 SOCIO-ECONOMIC
-from .socio_economic.infrastructure_reach import get_infrastructure_score
+from .socio_economic.infrastructure_proximity import get_infrastructure_score
 from .socio_economic.landuse_status import infer_landuse_score
 from .socio_economic.population_density import get_population_data
 
@@ -426,9 +426,6 @@ class GeoDataService:
         # Import the new hydrology factor
         from .hydrology.groundwater_recharge import get_groundwater_recharge_potential
         
-        # Import the updated infrastructure factor
-        from .socio_econ.infrastructure_proximity import get_infrastructure_proximity
-        
         # Import the new Risk & Resilience factors
         from .risk_resilience.multi_hazard_risk import get_multi_hazard_risk
         from .risk_resilience.climate_change_stress import get_climate_change_stress
@@ -441,7 +438,7 @@ class GeoDataService:
         biodiversity_data = get_biodiversity_sensitivity(lat, lng)
         heat_island_data = get_heat_island_potential(lat, lng)
         groundwater_data = get_groundwater_recharge_potential(lat, lng)
-        infrastructure_data = get_infrastructure_proximity(lat, lng)
+        infrastructure_data = get_infrastructure_score(lat, lng)
         
         # Get Risk & Resilience data
         multi_hazard_data = get_multi_hazard_risk(lat, lng)

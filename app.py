@@ -334,36 +334,52 @@ def get_live_weather(lat, lng):
             "timezone": "auto"
         }
         
-        try:
-            resp = requests.get(url, params=params, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.exceptions.RequestException as e:
-            # Network error - use intelligent fallback data
-            logger.warning(f"Weather API Error: {e}")
-            
-            # Enhanced fallback for DNS resolution failures
-            if "getaddrinfo failed" in str(e) or "NameResolutionError" in str(e):
-                logger.warning("DNS resolution failed for Open-Meteo Weather API - using intelligent fallback")
-                weather_estimate = _get_regional_weather_estimate(lat, lng)
-                return weather_estimate
-            
-            # For any network error, use regional fallback
-            logger.warning("Weather API network failure - using intelligent fallback")
-            weather_estimate = _get_regional_weather_estimate(lat, lng)
-            return weather_estimate
-        except Exception as e:
-            logger.warning(f"Weather Data Error: {e}")
-            # For any processing error, use regional fallback
-            weather_estimate = _get_regional_weather_estimate(lat, lng)
-            return weather_estimate
-
-        current = data.get("current")
-        daily = data.get("daily", {})
-        hourly = data.get("hourly", {})
+        # Retry logic for better reliability
+        max_retries = 2
+        data = None
+        for attempt in range(max_retries):
+            try:
+                # Increased timeout for better reliability
+                resp = requests.get(url, params=params, timeout=30)
+                resp.raise_for_status()
+                data = resp.json()
+                break  # Success, exit retry loop
+            except requests.exceptions.RequestException as e:
+                if attempt == max_retries - 1:  # Last attempt
+                    # Network error - use intelligent fallback data
+                    logger.warning(f"Weather API Error after {max_retries} attempts: {e}")
+                    
+                    # Enhanced fallback for DNS resolution failures
+                    if "getaddrinfo failed" in str(e) or "NameResolutionError" in str(e):
+                        logger.warning("DNS resolution failed for Open-Meteo Weather API - using intelligent fallback")
+                        weather_estimate = _get_regional_weather_estimate(lat, lng)
+                        return weather_estimate
+                    
+                    # For any network error, use regional fallback
+                    logger.warning("Weather API network failure - using intelligent fallback")
+                    weather_estimate = _get_regional_weather_estimate(lat, lng)
+                    return weather_estimate
+                else:
+                    logger.warning(f"Weather API attempt {attempt + 1} failed, retrying...")
+                    continue
         
-        if not current:
-            return None
+        # Check if we got valid data
+        if data is None:
+            logger.warning("Weather API failed to return data - using intelligent fallback")
+            weather_estimate = _get_regional_weather_estimate(lat, lng)
+            return weather_estimate
+        
+        try:
+            current = data.get("current")
+            daily = data.get("daily", {})
+            hourly = data.get("hourly", {})
+            
+            if not current:
+                return None
+        except Exception as e:
+            logger.warning(f"Weather data processing error: {e}")
+            weather_estimate = _get_regional_weather_estimate(lat, lng)
+            return weather_estimate
 
         code = current.get("weather_code", 0)
         is_day = current.get("is_day")
@@ -851,12 +867,15 @@ def get_visual_forensics(lat, lng, past_year=2017):
                 "zoom": zoom,
                 "xtile": xtile,
                 "ytile": ytile,
-                "pixel_change_pct": pixel_change_pct,
-                "mean_diff": mean_diff,
+                "pixel_change_pct": round(pixel_change_pct, 2),
+                "mean_diff": round(mean_diff, 4),
                 "resolution_m_per_px": res_m,
                 "threshold_used": threshold,
                 "source": "Sentinel-2 Cloudless (EOX)",
-                "interpretation": f"{pixel_change_pct}% pixels changed (threshold {threshold}); resolution ~{res_m}m/px."
+                "interpretation": f"{pixel_change_pct}% pixels changed (threshold {threshold}); resolution ~{res_m}m/px.",
+                # Enhanced with 23-factor analysis
+                "factors_23": _get_visual_factors_summary(lat, lng),
+                "location_classification": _get_visual_factors_summary(lat, lng).get("location_type", "Mixed Development")
             }
         }
 
@@ -867,6 +886,196 @@ def get_visual_forensics(lat, lng, past_year=2017):
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "healthy"}), 200
+def _get_visual_factors_summary(lat, lng):
+    """
+    Get a summary of 23 factors for visual analysis telemetry.
+    Returns categorized factor scores with proper location context.
+    """
+    try:
+        from suitability_factors.aggregator import Aggregator
+        from suitability_factors.geo_data_service import GeoDataService
+        
+        # Get comprehensive factor data
+        factor_data = GeoDataService.get_land_intelligence(lat, lng)
+        agg_result = Aggregator.compute_suitability_score(factor_data)
+        
+        # Extract 23 factors with proper categorization
+        raw_factors = factor_data.get("raw_factors", {})
+        
+        return {
+            "physical": {
+                "elevation": round(float(raw_factors.get("physical", {}).get("elevation", {}).get("value", 50)), 1),
+                "ruggedness": round(float(raw_factors.get("physical", {}).get("ruggedness", {}).get("value", 50)), 1),
+                "slope": round(float(raw_factors.get("physical", {}).get("slope", {}).get("value", 50)), 1),
+                "stability": round(float(raw_factors.get("physical", {}).get("stability", {}).get("value", 50)), 1)
+            },
+            "environmental": {
+                "vegetation": round(float(raw_factors.get("environmental", {}).get("vegetation", {}).get("value", 50)), 1),
+                "pollution": round(float(raw_factors.get("environmental", {}).get("pollution", {}).get("value", 50)), 1),
+                "soil": round(float(raw_factors.get("environmental", {}).get("soil", {}).get("value", 50)), 1),
+                "biodiversity": round(float(raw_factors.get("environmental", {}).get("biodiversity", {}).get("value", 50)), 1),
+                "heat_island": round(float(raw_factors.get("environmental", {}).get("heat_island", {}).get("value", 50)), 1)
+            },
+            "hydrology": {
+                "flood": round(float(raw_factors.get("hydrology", {}).get("flood", {}).get("value", 50)), 1),
+                "water": round(float(raw_factors.get("hydrology", {}).get("water", {}).get("value", 50)), 1),
+                "drainage": round(float(raw_factors.get("hydrology", {}).get("drainage", {}).get("value", 50)), 1),
+                "groundwater": round(float(raw_factors.get("hydrology", {}).get("groundwater", {}).get("value", 50)), 1)
+            },
+            "climatic": {
+                "intensity": round(float(raw_factors.get("climatic", {}).get("intensity", {}).get("value", 50)), 1),
+                "rainfall": round(float(raw_factors.get("climatic", {}).get("rainfall", {}).get("value", 50)), 1),
+                "thermal": round(float(raw_factors.get("climatic", {}).get("thermal", {}).get("value", 50)), 1)
+            },
+            "socio_econ": {
+                "infrastructure": round(float(raw_factors.get("socio_econ", {}).get("infrastructure", {}).get("value", 50)), 1),
+                "landuse": round(float(raw_factors.get("socio_econ", {}).get("landuse", {}).get("value", 50)), 1),
+                "population": round(float(raw_factors.get("socio_econ", {}).get("population", {}).get("value", 50)), 1)
+            },
+            "risk_resilience": {
+                "multi_hazard": round(float(raw_factors.get("risk_resilience", {}).get("multi_hazard", {}).get("value", 50)), 1),
+                "climate_change": round(float(raw_factors.get("risk_resilience", {}).get("climate_change", {}).get("value", 50)), 1),
+                "recovery": round(float(raw_factors.get("risk_resilience", {}).get("recovery", {}).get("value", 50)), 1),
+                "habitability": round(float(raw_factors.get("risk_resilience", {}).get("habitability", {}).get("value", 50)), 1)
+            },
+            "category_scores": agg_result.get("category_scores", {}),
+            "suitability_score": round(float(agg_result.get("score", 50)), 1),
+            "location_type": _classify_location_type({
+                "physical": raw_factors.get("physical", {}),
+                "environmental": raw_factors.get("environmental", {}),
+                "hydrology": raw_factors.get("hydrology", {}),
+                "climatic": raw_factors.get("climatic", {}),
+                "socio_econ": raw_factors.get("socio_econ", {}),
+                "risk_resilience": raw_factors.get("risk_resilience", {})
+            })
+        }
+    except Exception as e:
+        logger.debug(f"Failed to get visual factors summary: {e}")
+        # Return default structure
+        return {
+            "physical": {"elevation": 50, "ruggedness": 50, "slope": 50, "stability": 50},
+            "environmental": {"vegetation": 50, "pollution": 50, "soil": 50, "biodiversity": 50, "heat_island": 50},
+            "hydrology": {"flood": 50, "water": 50, "drainage": 50, "groundwater": 50},
+            "climatic": {"intensity": 50, "rainfall": 50, "thermal": 50},
+            "socio_econ": {"infrastructure": 50, "landuse": 50, "population": 50},
+            "risk_resilience": {"multi_hazard": 50, "climate_change": 50, "recovery": 50, "habitability": 50},
+            "category_scores": {},
+            "suitability_score": 50,
+            "location_type": "Mixed Development"
+        }
+
+
+def _classify_location_type(factors):
+    """
+    Classify location type based on dominant factor patterns.
+    Returns detailed location classification.
+    """
+    scores = []
+    
+    # Water body detection
+    water_score = factors.get("hydrology", {}).get("water", 50)
+    if water_score <= 10:
+        return "Water Body"
+    
+    # Urban area detection
+    infrastructure = factors.get("socio_econ", {}).get("infrastructure", 50)
+    population = factors.get("socio_econ", {}).get("population", 50)
+    landuse = factors.get("socio_econ", {}).get("landuse", 50)
+    vegetation = factors.get("environmental", {}).get("vegetation", 50)
+    
+    if infrastructure > 70 and population > 60 and vegetation < 30:
+        return "Urban Metropolitan"
+    elif infrastructure > 50 and population > 40:
+        return "Urban Suburban"
+    
+    # Forest/Natural area detection
+    vegetation = factors.get("environmental", {}).get("vegetation", 50)
+    biodiversity = factors.get("environmental", {}).get("biodiversity", 50)
+    pollution = factors.get("environmental", {}).get("pollution", 50)
+    infrastructure = factors.get("socio_econ", {}).get("infrastructure", 50)
+    
+    if vegetation > 70 and biodiversity > 60 and pollution < 30 and infrastructure < 40:
+        return "Protected Forest"
+    elif vegetation > 60 and biodiversity > 50:
+        return "Natural Forest"
+    
+    # Agricultural area detection
+    soil = factors.get("environmental", {}).get("soil", 50)
+    water = factors.get("hydrology", {}).get("water", 50)
+    rainfall = factors.get("climatic", {}).get("rainfall", 50)
+    
+    if soil > 60 and water > 50 and rainfall > 50 and infrastructure < 60:
+        return "Agricultural Zone"
+    
+    # Industrial area detection
+    pollution = factors.get("environmental", {}).get("pollution", 50)
+    infrastructure = factors.get("socio_econ", {}).get("infrastructure", 50)
+    landuse = factors.get("socio_econ", {}).get("landuse", 50)
+    
+    if pollution > 60 and infrastructure > 60 and landuse > 60:
+        return "Industrial Zone"
+    
+    # Coastal/Wetland detection (more restrictive)
+    flood = factors.get("hydrology", {}).get("flood", 50)
+    water = factors.get("hydrology", {}).get("water", 50)
+    groundwater = factors.get("hydrology", {}).get("groundwater", 50)
+    
+    # Only classify as coastal/wetland if ALL conditions are met AND not in normal urban/forest areas
+    vegetation = factors.get("environmental", {}).get("vegetation", 50)
+    infrastructure = factors.get("socio_econ", {}).get("infrastructure", 50)
+    
+    # More restrictive coastal/wetland detection
+    if (flood > 75 and water > 75 and groundwater > 75 and 
+        vegetation < 40 and infrastructure < 30):
+        return "Coastal Wetland"
+    elif water > 80 and vegetation < 35 and infrastructure < 25:
+        return "Water Proximity"
+    
+    # Mountainous/Hilly area detection
+    elevation = factors.get("physical", {}).get("elevation", 50)
+    slope = factors.get("physical", {}).get("slope", 50)
+    ruggedness = factors.get("physical", {}).get("ruggedness", 50)
+    
+    if elevation > 70 and slope > 60 and ruggedness > 60:
+        return "Mountainous Terrain"
+    elif slope > 50 and ruggedness > 50:
+        return "Hilly Terrain"
+    
+    # Rural/Mixed development
+    if infrastructure > 40 and population > 30:
+        return "Rural Development"
+    
+    # Default classification
+    return "Mixed Development"
+
+
+def _get_dominant_category(category_scores):
+    """
+    Determine the dominant category based on category scores.
+    """
+    if not category_scores:
+        return "Balanced"
+    
+    max_score = 0
+    dominant_category = "Balanced"
+    
+    category_names = {
+        "physical": "Physical Terrain",
+        "environmental": "Environmental Quality",
+        "hydrology": "Hydrological Conditions",
+        "climatic": "Climatic Factors",
+        "socio_econ": "Socio-Economic",
+        "risk_resilience": "Risk & Resilience"
+    }
+    
+    for category, score in category_scores.items():
+        if score > max_score:
+            max_score = score
+            dominant_category = category_names.get(category, category)
+    
+    return dominant_category
+
+
 def get_cnn_classification(lat, lng):
     try:
         import math
@@ -912,10 +1121,91 @@ def get_cnn_classification(lat, lng):
         top_class = LAND_CLASSES[index.item()]
         top_prob = round(probabilities[index.item()].item() * 100, 2)
 
-        # Telemetry for live display: tile coords, resolution, raw CNN output
+        # Enhanced telemetry with 23-factor analysis
         zoom = 18
         res_m = round(156543.03 * math.cos(math.radians(lat)) / (2 ** zoom), 2)
-
+        
+        # Initialize variables to avoid scope issues
+        agg_result = {"score": 50, "category_scores": {}}
+        
+        # Get 23-factor scores for comprehensive telemetry
+        try:
+            from suitability_factors.aggregator import Aggregator
+            from suitability_factors.geo_data_service import GeoDataService
+            
+            # Get comprehensive factor data
+            factor_data = GeoDataService.get_land_intelligence(lat, lng)
+            agg_result = Aggregator.compute_suitability_score(factor_data)
+            
+            # Extract 23 factors with proper categorization
+            raw_factors = factor_data.get("raw_factors", {})
+            
+            # Physical factors (4)
+            physical = raw_factors.get("physical", {})
+            elevation_score = physical.get("elevation", {}).get("value", 50)
+            ruggedness_score = physical.get("ruggedness", {}).get("value", 50)
+            slope_score = physical.get("slope", {}).get("value", 50)
+            stability_score = physical.get("stability", {}).get("value", 50)
+            
+            # Environmental factors (5)
+            environmental = raw_factors.get("environmental", {})
+            vegetation_score = environmental.get("vegetation", {}).get("value", 50)
+            pollution_score = environmental.get("pollution", {}).get("value", 50)
+            soil_score = environmental.get("soil", {}).get("value", 50)
+            biodiversity_score = environmental.get("biodiversity", {}).get("value", 50)
+            heat_island_score = environmental.get("heat_island", {}).get("value", 50)
+            
+            # Hydrology factors (4)
+            hydrology = raw_factors.get("hydrology", {})
+            flood_score = hydrology.get("flood", {}).get("value", 50)
+            water_score = hydrology.get("water", {}).get("value", 50)
+            drainage_score = hydrology.get("drainage", {}).get("value", 50)
+            groundwater_score = hydrology.get("groundwater", {}).get("value", 50)
+            
+            # Climatic factors (3)
+            climatic = raw_factors.get("climatic", {})
+            intensity_score = climatic.get("intensity", {}).get("value", 50)
+            rainfall_score = climatic.get("rainfall", {}).get("value", 50)
+            thermal_score = climatic.get("thermal", {}).get("value", 50)
+            
+            # Socio-economic factors (3)
+            socio_econ = raw_factors.get("socio_econ", {})
+            infrastructure_score = socio_econ.get("infrastructure", {}).get("value", 50)
+            landuse_score = socio_econ.get("landuse", {}).get("value", 50)
+            population_score = socio_econ.get("population", {}).get("value", 50)
+            
+            # Risk & resilience factors (4)
+            risk_resilience = raw_factors.get("risk_resilience", {})
+            multi_hazard_score = risk_resilience.get("multi_hazard", {}).get("value", 50)
+            climate_change_score = risk_resilience.get("climate_change", {}).get("value", 50)
+            recovery_score = risk_resilience.get("recovery", {}).get("value", 50)
+            habitability_score = risk_resilience.get("habitability", {}).get("value", 50)
+            
+            # Category scores
+            category_scores = agg_result.get("category_scores", {})
+            
+            # Location classification based on dominant factors
+            location_type = _classify_location_type({
+                "physical": {"elevation": elevation_score, "ruggedness": ruggedness_score, "slope": slope_score, "stability": stability_score},
+                "environmental": {"vegetation": vegetation_score, "pollution": pollution_score, "soil": soil_score, "biodiversity": biodiversity_score, "heat_island": heat_island_score},
+                "hydrology": {"flood": flood_score, "water": water_score, "drainage": drainage_score, "groundwater": groundwater_score},
+                "climatic": {"intensity": intensity_score, "rainfall": rainfall_score, "thermal": thermal_score},
+                "socio_econ": {"infrastructure": infrastructure_score, "landuse": landuse_score, "population": population_score},
+                "risk_resilience": {"multi_hazard": multi_hazard_score, "climate_change": climate_change_score, "recovery": recovery_score, "habitability": habitability_score}
+            })
+            
+        except Exception as e:
+            logger.debug(f"Failed to get 23-factor telemetry: {e}")
+            # Fallback to default values
+            elevation_score = ruggedness_score = slope_score = stability_score = 50
+            vegetation_score = pollution_score = soil_score = biodiversity_score = heat_island_score = 50
+            flood_score = water_score = drainage_score = groundwater_score = 50
+            intensity_score = rainfall_score = thermal_score = 50
+            infrastructure_score = landuse_score = population_score = 50
+            multi_hazard_score = climate_change_score = recovery_score = habitability_score = 50
+            category_scores = {}
+            location_type = "Mixed Development"
+        
         return {
             "class": top_class,
             "confidence": conf_val,
@@ -927,7 +1217,53 @@ def get_cnn_classification(lat, lng):
                 "resolution_m_per_px": res_m,
                 "top_class": top_class,
                 "top_probability": top_prob,
-                "tile_url_source": "Sentinel-2 Cloudless (EOX 2020)"
+                "tile_url_source": "Sentinel-2 Cloudless (EOX 2020)",
+                "location_type": location_type,
+                "category_scores": category_scores,
+                "factors_23": {
+                    "physical": {
+                        "elevation": round(float(elevation_score), 1),
+                        "ruggedness": round(float(ruggedness_score), 1),
+                        "slope": round(float(slope_score), 1),
+                        "stability": round(float(stability_score), 1)
+                    },
+                    "environmental": {
+                        "vegetation": round(float(vegetation_score), 1),
+                        "pollution": round(float(pollution_score), 1),
+                        "soil": round(float(soil_score), 1),
+                        "biodiversity": round(float(biodiversity_score), 1),
+                        "heat_island": round(float(heat_island_score), 1)
+                    },
+                    "hydrology": {
+                        "flood": round(float(flood_score), 1),
+                        "water": round(float(water_score), 1),
+                        "drainage": round(float(drainage_score), 1),
+                        "groundwater": round(float(groundwater_score), 1)
+                    },
+                    "climatic": {
+                        "intensity": round(float(intensity_score), 1),
+                        "rainfall": round(float(rainfall_score), 1),
+                        "thermal": round(float(thermal_score), 1)
+                    },
+                    "socio_econ": {
+                        "infrastructure": round(float(infrastructure_score), 1),
+                        "landuse": round(float(landuse_score), 1),
+                        "population": round(float(population_score), 1)
+                    },
+                    "risk_resilience": {
+                        "multi_hazard": round(float(multi_hazard_score), 1),
+                        "climate_change": round(float(climate_change_score), 1),
+                        "recovery": round(float(recovery_score), 1),
+                        "habitability": round(float(habitability_score), 1)
+                    }
+                },
+                "analysis_summary": {
+                    "total_factors": 23,
+                    "categories": 6,
+                    "dominant_category": _get_dominant_category(category_scores),
+                    "suitability_score": round(float(agg_result.get("score", 50)), 1),
+                    "classification_confidence": "High" if conf_val > 80 else "Medium" if conf_val > 60 else "Low"
+                }
             }
         }
 
@@ -938,7 +1274,25 @@ def get_cnn_classification(lat, lng):
             "confidence": 0,
             "confidence_display": "N/A",
             "image_sample": None,
-            "telemetry": {"model": "MobileNetV2", "error": str(e)[:80]}
+            "telemetry": {
+                "model": "MobileNetV2",
+                "error": str(e)[:80],
+                "factors_23": {
+                    "physical": {"elevation": 0, "ruggedness": 0, "slope": 0, "stability": 0},
+                    "environmental": {"vegetation": 0, "pollution": 0, "soil": 0, "biodiversity": 0, "heat_island": 0},
+                    "hydrology": {"flood": 0, "water": 0, "drainage": 0, "groundwater": 0},
+                    "climatic": {"intensity": 0, "rainfall": 0, "thermal": 0},
+                    "socio_econ": {"infrastructure": 0, "landuse": 0, "population": 0},
+                    "risk_resilience": {"multi_hazard": 0, "climate_change": 0, "recovery": 0, "habitability": 0}
+                },
+                "analysis_summary": {
+                    "total_factors": 23,
+                    "categories": 6,
+                    "dominant_category": "Unknown",
+                    "suitability_score": 0,
+                    "classification_confidence": "Failed"
+                }
+            }
         }
 
 @app.route('/ask_geogpt', methods=['POST'])
@@ -3383,14 +3737,14 @@ def suitability():
             result['cnn_analysis'] = cnn_analysis 
             return jsonify(result)
 
-        # 2. 🚀 TRIGGER 15-FACTOR ANALYSIS (Integrated Logic)
+        # 2. 🚀 TRIGGER 23-FACTOR ANALYSIS (Integrated Logic)
         # Calls GeoDataService and Aggregator inside your master function
         result = _perform_suitability_analysis(latitude, longitude)
 
         # 3. INJECT CNN DATA (Preserved Logic)
         result['cnn_analysis'] = cnn_analysis
 
-        # 4. ALIGN CLASSIFICATION (Updated for 15-Factor Nested Structure)
+        # 4. ALIGN CLASSIFICATION (Updated for 23-Factor Nested Structure)
         # Use vegetation + landuse + infra + pollution so Visual Intelligence matches factor scores
         # f = result['factors']
         
@@ -3594,11 +3948,11 @@ def suitability():
         result['cnn_analysis']['class'] = inferred_class
         result['cnn_analysis']['confidence'] = round(conf, 1)
         result['cnn_analysis']['confidence_display'] = f"{round(conf, 1)}%"
-        result['cnn_analysis']['note'] = f"Enhanced 15-factor geospatial analysis"
+        result['cnn_analysis']['note'] = f"Enhanced 23-factor geospatial analysis"
         result['cnn_analysis']['reasoning'] = reasoning
         
         if result['cnn_analysis'].get('telemetry'):
-            result['cnn_analysis']['telemetry']['verified_by'] = "Enhanced 15-factor geospatial cross-check"
+            result['cnn_analysis']['telemetry']['verified_by'] = "Enhanced 23-factor geospatial cross-check"
             result['cnn_analysis']['telemetry']['inferred_from'] = f"veg={vegetation_score:.0f}, landuse={landuse_score:.0f}, infra={infrastructure_score:.0f}, poll={poll_score:.0f}, pop={pop_score:.0f}"
             result['cnn_analysis']['telemetry']['vegetation_score'] = round(vegetation_score, 1)
             result['cnn_analysis']['telemetry']['landuse_score'] = round(landuse_score, 1)
@@ -3633,7 +3987,7 @@ def suitability():
         # result['weather'] = get_live_weather(latitude, longitude)
         # ANALYSIS_CACHE[cache_key] = result
         # 6. STRATEGIC INTELLIGENCE (The Main Update)
-        # We must create a dictionary that matches the 15-factor expectations exactly
+        # We must create a dictionary that matches the 23-factor expectations exactly
         flat_factors_for_intel = {
             "slope": slope_score,
             "elevation": ff["physical"]["elevation"]["value"],
@@ -5322,7 +5676,7 @@ def _generate_slope_verdict(slope_percent):
 #         out_extra["ml_score"] = ml_score
 #         out_extra["score_source_ml"] = score_source_ml
 
-#     # 7. CONSTRUCT THE 15-FACTOR OUTPUT BUNDLE
+#     # 7. CONSTRUCT THE 23-FACTOR OUTPUT BUNDLE
 #     return {
 #         "suitability_score": agg_result["score"],
 #         "label": agg_result["label"],
@@ -5704,7 +6058,7 @@ def check_global_tier_one(lat, lng):
 #         out_extra["ml_score"] = ml_score
 #         out_extra["score_source_ml"] = score_source_ml
 
-#     # 7. CONSTRUCT THE 15-FACTOR OUTPUT BUNDLE
+#     # 7. CONSTRUCT THE 23-FACTOR OUTPUT BUNDLE
 #     return {
 #         "suitability_score": agg_result["score"],
 #         "label": agg_result["label"],
@@ -5765,11 +6119,24 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
     # 1. 🚀 RECRUIT ALL 23 FACTORS
     intelligence = GeoDataService.get_land_intelligence(latitude, longitude)
     
-    # --- DYNAMIC POLLUTION OVERRIDE ---
-    real_pollution = fetch_realtime_pollution(latitude, longitude)
-    if real_pollution:
-        intelligence["raw_factors"]["environmental"]["pollution"] = real_pollution
+    # # --- DYNAMIC POLLUTION OVERRIDE ---
+    # real_pollution = fetch_realtime_pollution(latitude, longitude)
+    # if real_pollution:
+    #     intelligence["raw_factors"]["environmental"]["pollution"] = real_pollution
     
+    # --- DYNAMIC REAL-TIME POLLUTION OVERRIDE ---
+    # This calls the Open-Meteo Air Quality API (which handles water and land equally)
+    real_pollution_data = fetch_realtime_pollution(latitude, longitude)
+    
+    if real_pollution_data:
+        # Inject real-time measurements into the raw factor pool
+        intelligence["raw_factors"]["environmental"]["pollution"] = real_pollution_data
+        
+        # Log success for telemetry
+        logger.info(f"Pollution Sync Successful: {real_pollution_data['value']} AQI Score")
+    else:
+        logger.warning("Real-time pollution sync failed; using satellite baseline.")
+    # --------------------------------------------
     # --- UNIVERSAL ACCESSIBILITY (CITY ANCHORS) OVERRIDE ---
     hub_intelligence = get_infrastructure_score(latitude, longitude)
     
@@ -5888,7 +6255,7 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
     ml_score, ml_used, score_source_ml = _predict_suitability_ml(flat_factors)
     out_extra = {"ml_score": ml_score, "score_source_ml": score_source_ml} if ml_used else {}
 
-    # 7. CONSTRUCT THE 15-FACTOR OUTPUT BUNDLE
+    # 7. CONSTRUCT THE 23-FACTOR OUTPUT BUNDLE
     return {
         "suitability_score": agg_result["score"],
         "label": agg_result["label"],
@@ -6143,58 +6510,304 @@ def _perform_suitability_analysis(latitude: float, longitude: float) -> dict:
 #         logger.exception("Internal PDF Generation Error")
 #         return jsonify({"error": "Failed to generate tactical report. See server logs."}), 500
     
+# @app.route("/generate_report", methods=["POST", "OPTIONS"])
+# def generate_report():
+#     if request.method == "OPTIONS":
+#         return jsonify({}), 200
+        
+#     try:
+#         data = request.json
+#         if not data:
+#             return jsonify({"error": "No data received"}), 400
+        
+#         # 1. Prepare Site A Intelligence
+#         # We ensure 'strategic_intelligence' is prioritized as it powers Section 03
+#         loc_a = data.get("location")
+#         if loc_a:
+#             # Check for critical Section 03 data
+#             if "strategic_intelligence" not in data:
+#                 logger.warning("Strategic intelligence data missing for Site A")
+            
+#             # Enrich with nearby places for the intelligence report
+#             try:
+#                 lat_a = loc_a.get("latitude") or loc_a.get("lat")
+#                 lng_a = loc_a.get("longitude") or loc_a.get("lng")
+#                 places_a = get_nearby_named_places(lat_a, lng_a)
+#                 data["nearby_places"] = {"places": places_a}
+#             except Exception as e:
+#                 logger.error(f"Nearby places A fetch failed: {e}")
+#                 data["nearby_places"] = {"places": []}
+
+#         # 2. Prepare Site B Intelligence (Comparative Mode)
+#         compare_data = data.get("compareData")
+#         if compare_data:
+#             loc_b = compare_data.get("location")
+#             if loc_b:
+#                 # Ensure Site B also carries its own strategic insights
+#                 if "strategic_intelligence" not in compare_data:
+#                     logger.warning("Strategic intelligence data missing for Site B")
+                
+#                 try:
+#                     lat_b = loc_b.get("latitude") or loc_b.get("lat")
+#                     lng_b = loc_b.get("longitude") or loc_b.get("lng")
+#                     places_b = get_nearby_named_places(lat_b, lng_b)
+#                     data["compareData"]["nearby_places"] = {"places": places_b}
+#                 except Exception as e:
+#                     logger.error(f"Nearby places B fetch failed: {e}")
+#                     data["compareData"]["nearby_places"] = {"places": []}
+
+#         # 3. Generate PDF Buffer 
+#         # The generator now processes Section 01, 02, and 03 in order
+#         pdf_buffer = generate_land_report(data)
+#         pdf_buffer.seek(0)
+
+#         # 4. Generate dynamic filename based on Location A
+#         location_name = data.get("locationName") or "GeoAI_Analysis"
+#         clean_name = "".join([c if c.isalnum() else "_" for c in str(location_name)])
+#         timestamp = datetime.now().strftime("%Y%m%d")
+
+#         return send_file(
+#             pdf_buffer,
+#             as_attachment=True,
+#             download_name=f"GeoAI_Report_{clean_name}_{timestamp}.pdf",
+#             mimetype="application/pdf"
+#         )
+
+#     except Exception as e:
+#         logger.exception("Critical PDF Generation Error")
+#         return jsonify({
+#             "error": "Failed to generate tactical report. Internal server error.",
+#             "details": str(e)
+#         }), 500
+# @app.route("/generate_report", methods=["POST", "OPTIONS"])
+# def generate_report():
+#     if request.method == "OPTIONS":
+#         return jsonify({}), 200
+
+#     try:
+#         data = request.json or {}
+#         if not data:F
+#             return jsonify({"error": "No data received"}), 400
+
+#         # ============================================================
+#         # Helper: safe coords extraction
+#         # ============================================================
+#         def _extract_coords(site_obj):
+#             loc = (site_obj or {}).get("location") or {}
+#             lat = loc.get("latitude") or loc.get("lat")
+#             lng = loc.get("longitude") or loc.get("lng")
+#             return lat, lng
+
+#         # ============================================================
+#         # Helper: ensure required keys exist so PDF never crashes
+#         # ============================================================
+#         def _ensure_pdf_keys(site_obj):
+#             if not isinstance(site_obj, dict):
+#                 site_obj = {}
+
+#             site_obj.setdefault("locationName", "Site")
+#             site_obj.setdefault("location", {"latitude": 0.0, "longitude": 0.0})
+
+#             # Suitability core
+#             site_obj.setdefault("suitability_score", 0)
+#             site_obj.setdefault("label", "N/A")
+#             site_obj.setdefault("factors", {})
+#             site_obj.setdefault("category_scores", {})
+#             site_obj.setdefault("explanation", {})
+
+#             # Intelligence cards
+#             site_obj.setdefault("weather", None)
+#             site_obj.setdefault("cnn_analysis", None)
+#             site_obj.setdefault("terrain_analysis", None)
+#             site_obj.setdefault("geospatial_passport", None)
+
+#             # New UI intelligence cards (from snapshot tab)
+#             site_obj.setdefault("snapshot_identity", None)
+#             site_obj.setdefault("hazards_analysis", None)
+
+#             # Strategic Utility tab
+#             site_obj.setdefault("strategic_intelligence", {})
+
+#             # Nearby (for future use)
+#             site_obj.setdefault("nearby_places", {"places": []})
+
+#             return site_obj
+
+#         # ============================================================
+#         # 1) Normalize Site A
+#         # ============================================================
+#         data = _ensure_pdf_keys(data)
+#         lat_a, lng_a = _extract_coords(data)
+
+#         # ============================================================
+#         # 2) Enrich Nearby Places A (ONLY if coords exist)
+#         # ============================================================
+#         try:
+#             if lat_a is not None and lng_a is not None:
+#                 places_a = get_nearby_named_places(float(lat_a), float(lng_a))
+#                 data["nearby_places"] = {"places": places_a}
+#             else:
+#                 data["nearby_places"] = {"places": []}
+#         except Exception as e:
+#             logger.error(f"Nearby places A fetch failed: {e}")
+#             data["nearby_places"] = {"places": []}
+
+#         # ============================================================
+#         # 3) Normalize Site B (Compare Mode)
+#         # ============================================================
+#         compare_data = data.get("compareData")
+#         if compare_data:
+#             compare_data = _ensure_pdf_keys(compare_data)
+
+#             lat_b, lng_b = _extract_coords(compare_data)
+
+#             # Nearby Places B
+#             try:
+#                 if lat_b is not None and lng_b is not None:
+#                     places_b = get_nearby_named_places(float(lat_b), float(lng_b))
+#                     compare_data["nearby_places"] = {"places": places_b}
+#                 else:
+#                     compare_data["nearby_places"] = {"places": []}
+#             except Exception as e:
+#                 logger.error(f"Nearby places B fetch failed: {e}")
+#                 compare_data["nearby_places"] = {"places": []}
+
+#             data["compareData"] = compare_data
+
+#         # ============================================================
+#         # 4) Generate PDF Buffer
+#         # ============================================================
+#         pdf_buffer = generate_land_report(data)
+#         pdf_buffer.seek(0)
+
+#         # ============================================================
+#         # 5) Dynamic filename
+#         # ============================================================
+#         location_name = data.get("locationName") or "GeoAI_Analysis"
+#         clean_name = "".join([c if c.isalnum() else "_" for c in str(location_name)])
+#         timestamp = datetime.now().strftime("%Y%m%d")
+
+#         return send_file(
+#             pdf_buffer,
+#             as_attachment=True,
+#             download_name=f"GeoAI_Report_{clean_name}_{timestamp}.pdf",
+#             mimetype="application/pdf",
+#         )
+
+#     except Exception as e:
+#         logger.exception("Critical PDF Generation Error")
+#         return jsonify({
+#             "error": "Failed to generate GeoAI report. Internal server error.",
+#             "details": str(e)
+#         }), 500
+from flask import request, jsonify, send_file
+from datetime import datetime
+
 @app.route("/generate_report", methods=["POST", "OPTIONS"])
 def generate_report():
     if request.method == "OPTIONS":
         return jsonify({}), 200
-        
+
     try:
-        data = request.json
+        data = request.json or {}
         if not data:
             return jsonify({"error": "No data received"}), 400
-        
-        # 1. Prepare Site A Intelligence
-        # We ensure 'strategic_intelligence' is prioritized as it powers Section 03
-        loc_a = data.get("location")
-        if loc_a:
-            # Check for critical Section 03 data
-            if "strategic_intelligence" not in data:
-                logger.warning("Strategic intelligence data missing for Site A")
-            
-            # Enrich with nearby places for the intelligence report
-            try:
-                lat_a = loc_a.get("latitude") or loc_a.get("lat")
-                lng_a = loc_a.get("longitude") or loc_a.get("lng")
-                places_a = get_nearby_named_places(lat_a, lng_a)
-                data["nearby_places"] = {"places": places_a}
-            except Exception as e:
-                logger.error(f"Nearby places A fetch failed: {e}")
-                data["nearby_places"] = {"places": []}
 
-        # 2. Prepare Site B Intelligence (Comparative Mode)
+        # ============================================================
+        # Helper: safe coords extraction
+        # ============================================================
+        def _extract_coords(site_obj):
+            loc = (site_obj or {}).get("location") or {}
+            lat = loc.get("latitude") or loc.get("lat")
+            lng = loc.get("longitude") or loc.get("lng")
+            return lat, lng
+
+        # ============================================================
+        # Helper: ensure required keys exist so PDF never crashes
+        # ============================================================
+        def _ensure_pdf_keys(site_obj):
+            if not isinstance(site_obj, dict):
+                site_obj = {}
+
+            # Core identity
+            site_obj.setdefault("locationName", "Site")
+            site_obj.setdefault("location", {"latitude": 0.0, "longitude": 0.0})
+
+            # Suitability core
+            site_obj.setdefault("suitability_score", 0)
+            site_obj.setdefault("label", "N/A")
+            site_obj.setdefault("factors", {})
+            site_obj.setdefault("category_scores", {})
+            site_obj.setdefault("explanation", {})
+
+            # Intelligence cards
+            site_obj.setdefault("weather", None)
+            site_obj.setdefault("cnn_analysis", None)
+            site_obj.setdefault("terrain_analysis", None)
+            site_obj.setdefault("geospatial_passport", None)
+
+            # New UI intelligence cards (from snapshot tab)
+            site_obj.setdefault("snapshot_identity", None)
+            site_obj.setdefault("hazards_analysis", None)
+
+            # Strategic Utility tab
+            site_obj.setdefault("strategic_intelligence", {})
+
+            # Nearby (for future use)
+            site_obj.setdefault("nearby_places", {"places": []})
+
+            return site_obj
+
+        # ============================================================
+        # 1) Normalize Site A
+        # ============================================================
+        data = _ensure_pdf_keys(data)
+        lat_a, lng_a = _extract_coords(data)
+
+        # ============================================================
+        # 2) Enrich Nearby Places A (ONLY if coords exist)
+        # ============================================================
+        try:
+            if lat_a is not None and lng_a is not None:
+                places_a = get_nearby_named_places(float(lat_a), float(lng_a))
+                data["nearby_places"] = {"places": places_a}
+            else:
+                data["nearby_places"] = {"places": []}
+        except Exception as e:
+            logger.error(f"Nearby places A fetch failed: {e}")
+            data["nearby_places"] = {"places": []}
+
+        # ============================================================
+        # 3) Normalize Site B (Compare Mode)
+        # ============================================================
         compare_data = data.get("compareData")
         if compare_data:
-            loc_b = compare_data.get("location")
-            if loc_b:
-                # Ensure Site B also carries its own strategic insights
-                if "strategic_intelligence" not in compare_data:
-                    logger.warning("Strategic intelligence data missing for Site B")
-                
-                try:
-                    lat_b = loc_b.get("latitude") or loc_b.get("lat")
-                    lng_b = loc_b.get("longitude") or loc_b.get("lng")
-                    places_b = get_nearby_named_places(lat_b, lng_b)
-                    data["compareData"]["nearby_places"] = {"places": places_b}
-                except Exception as e:
-                    logger.error(f"Nearby places B fetch failed: {e}")
-                    data["compareData"]["nearby_places"] = {"places": []}
+            compare_data = _ensure_pdf_keys(compare_data)
 
-        # 3. Generate PDF Buffer 
-        # The generator now processes Section 01, 02, and 03 in order
+            lat_b, lng_b = _extract_coords(compare_data)
+
+            # Nearby Places B
+            try:
+                if lat_b is not None and lng_b is not None:
+                    places_b = get_nearby_named_places(float(lat_b), float(lng_b))
+                    compare_data["nearby_places"] = {"places": places_b}
+                else:
+                    compare_data["nearby_places"] = {"places": []}
+            except Exception as e:
+                logger.error(f"Nearby places B fetch failed: {e}")
+                compare_data["nearby_places"] = {"places": []}
+
+            data["compareData"] = compare_data
+
+        # ============================================================
+        # 4) Generate PDF Buffer
+        # ============================================================
         pdf_buffer = generate_land_report(data)
         pdf_buffer.seek(0)
 
-        # 4. Generate dynamic filename based on Location A
+        # ============================================================
+        # 5) Dynamic filename
+        # ============================================================
         location_name = data.get("locationName") or "GeoAI_Analysis"
         clean_name = "".join([c if c.isalnum() else "_" for c in str(location_name)])
         timestamp = datetime.now().strftime("%Y%m%d")
@@ -6203,15 +6816,16 @@ def generate_report():
             pdf_buffer,
             as_attachment=True,
             download_name=f"GeoAI_Report_{clean_name}_{timestamp}.pdf",
-            mimetype="application/pdf"
+            mimetype="application/pdf",
         )
 
     except Exception as e:
         logger.exception("Critical PDF Generation Error")
         return jsonify({
-            "error": "Failed to generate tactical report. Internal server error.",
+            "error": "Failed to generate GeoAI report. Internal server error.",
             "details": str(e)
         }), 500
+
 @app.route("/simulate-development", methods=["POST","OPTIONS"])
 def simulate_development():
     if request.method == "OPTIONS":

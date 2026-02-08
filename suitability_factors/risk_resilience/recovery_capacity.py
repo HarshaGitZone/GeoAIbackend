@@ -23,6 +23,44 @@ def get_recovery_capacity(lat: float, lng: float) -> Dict[str, Any]:
         Dictionary with recovery capacity score and metadata
     """
     try:
+        # FIRST: Check if this is a water body or protected rainforest
+        is_water_body = _is_water_body(lat, lng)
+        is_rainforest = _is_rainforest(lat, lng)
+        
+        if is_water_body:
+            return {
+                "value": 0.0,  # ZERO recovery capacity for water bodies
+                "recovery_index": 0.0,
+                "infrastructure_resilience": 0.0,
+                "emergency_services": 0.0,
+                "economic_capacity": 0.0,
+                "social_resilience": 0.0,
+                "institutional_capacity": 0.0,
+                "resource_availability": 0.0,
+                "recovery_time_estimate": "Impossible",
+                "label": "Water Body - No Recovery Capacity",
+                "source": "Water Body Detection (Recovery Override)",
+                "confidence": 95,
+                "reasoning": "Water bodies have zero recovery capacity for human habitation and development."
+            }
+        
+        if is_rainforest:
+            return {
+                "value": 5.0,  # VERY LOW recovery capacity for protected rainforests
+                "recovery_index": 5.0,
+                "infrastructure_resilience": 5.0,
+                "emergency_services": 2.0,
+                "economic_capacity": 3.0,
+                "social_resilience": 10.0,
+                "institutional_capacity": 5.0,
+                "resource_availability": 5.0,
+                "recovery_time_estimate": "Decades",
+                "label": "Protected Rainforest - Minimal Recovery Capacity",
+                "source": "Rainforest Detection (Recovery Override)",
+                "confidence": 90,
+                "reasoning": "Protected rainforests have minimal recovery capacity due to conservation restrictions and lack of infrastructure."
+            }
+        
         # Get recovery capacity indicators
         infrastructure_resilience = _get_infrastructure_resilience(lat, lng)
         emergency_services = _get_emergency_services_access(lat, lng)
@@ -59,6 +97,49 @@ def get_recovery_capacity(lat: float, lng: float) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error calculating recovery capacity for {lat}, {lng}: {e}")
         return _get_fallback_recovery(lat, lng)
+
+
+def _is_water_body(lat: float, lng: float) -> bool:
+    """
+    Check if location is a water body.
+    """
+    try:
+        # Import water utility to check for water bodies
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        from hydrology.water_utility import get_water_utility
+        water_data = get_water_utility(lat, lng)
+        return water_data.get("value", 100) == 0.0
+    except Exception:
+        return False
+
+
+def _is_rainforest(lat: float, lng: float) -> bool:
+    """
+    Check if location is in a protected rainforest area.
+    """
+    # Amazon Rainforest bounds
+    if -10.0 <= lat <= 2.0 and -79.0 <= lng <= -47.0:
+        return True
+    
+    # Congo Basin Rainforest
+    if -5.0 <= lat <= 5.0 and 10.0 <= lng <= 30.0:
+        return True
+    
+    # Southeast Asian Rainforests
+    if -10.0 <= lat <= 10.0 and 95.0 <= lng <= 140.0:
+        return True
+    
+    # Indonesian Rainforests
+    if -10.0 <= lat <= 5.0 and 110.0 <= lng <= 140.0:
+        return True
+    
+    # Central American Rainforests
+    if 0.0 <= lat <= 15.0 and -90.0 <= lng <= -75.0:
+        return True
+    
+    return False
 
 def _get_infrastructure_resilience(lat: float, lng: float) -> float:
     """Get infrastructure resilience assessment."""

@@ -84,6 +84,33 @@ class Aggregator:
             return default
 
     @classmethod
+    def _is_rainforest(cls, lat: float, lng: float) -> bool:
+        """
+        Check if location is in a protected rainforest area.
+        """
+        # Amazon Rainforest bounds
+        if -10.0 <= lat <= 2.0 and -79.0 <= lng <= -47.0:
+            return True
+        
+        # Congo Basin Rainforest
+        if -5.0 <= lat <= 5.0 and 10.0 <= lng <= 30.0:
+            return True
+        
+        # Southeast Asian Rainforests
+        if -10.0 <= lat <= 10.0 and 95.0 <= lng <= 140.0:
+            return True
+        
+        # Indonesian Rainforests
+        if -10.0 <= lat <= 5.0 and 110.0 <= lng <= 140.0:
+            return True
+        
+        # Central American Rainforests
+        if 0.0 <= lat <= 15.0 and -90.0 <= lng <= -75.0:
+            return True
+        
+        return False
+
+    @classmethod
     def compute_suitability_score(cls, package: Dict[str, Any]) -> Dict[str, Any]:
         """
         MASTER SCORING ENGINE
@@ -119,9 +146,23 @@ class Aggregator:
         else:
             vegetation_score = cls._normalize(ndvi_val, 50.0, "vegetation", lat, lng)
         
+        # Get soil score with basic context (water detection will be done after hydrology)
+        from .environmental.soil_health import estimate_soil_quality_score
+        if isinstance(e.get("soil"), dict) and "value" in e.get("soil", {}):
+            soil_score = e["soil"]["value"]
+        else:
+            # Basic soil context without water detection (will be updated later)
+            soil_context = {
+                "slope": slope_data.get("value") if isinstance(slope_data, dict) else slope_data,
+                "rain_mm_60d": None,
+                "is_water_body": False,  # Will be updated after hydrology
+                "is_rainforest": cls._is_rainforest(lat, lng) if lat and lng else False
+            }
+            soil_score = estimate_soil_quality_score(soil_context)
+        
         cat_environmental = (
             vegetation_score + 
-            cls._normalize(e.get("soil"), 50.0, "soil", lat, lng) + 
+            soil_score + 
             cls._normalize(e.get("pollution"), 50.0, "pollution", lat, lng) +
             cls._normalize(e.get("biodiversity"), 50.0, "biodiversity", lat, lng) +
             cls._normalize(e.get("heat_island"), 50.0, "heat_island", lat, lng)
@@ -137,13 +178,41 @@ class Aggregator:
         # Include all 4 hydrology factors in average
         cat_hydrology = (water_val + drainage_val + flood_val + groundwater_val) / 4
         flood_safety = flood_val  # Keep separate for penalty logic
+        
+        # --- Water body detection (after hydrology is calculated) ---
+        water_details = h.get("water", {}) if isinstance(h.get("water"), dict) else {}
+        water_dist = water_details.get("distance_km")
+        is_on_water = water_val <= 5 or (water_dist is not None and float(water_dist) < 0.02)
+        
+        # Update soil score if water body detected and soil was calculated with basic context
+        if is_on_water and not (isinstance(e.get("soil"), dict) and "value" in e.get("soil", {})):
+            # Recalculate soil score with correct water body detection
+            soil_context_updated = {
+                "slope": slope_data.get("value") if isinstance(slope_data, dict) else slope_data,
+                "rain_mm_60d": None,
+                "is_water_body": True,
+                "is_rainforest": cls._is_rainforest(lat, lng) if lat and lng else False
+            }
+            soil_score = estimate_soil_quality_score(soil_context_updated)
+            # Update environmental category with corrected soil score
+            cat_environmental = (
+                vegetation_score + 
+                soil_score + 
+                cls._normalize(e.get("pollution"), 50.0, "pollution", lat, lng) +
+                cls._normalize(e.get("biodiversity"), 50.0, "biodiversity", lat, lng) +
+                cls._normalize(e.get("heat_island"), 50.0, "heat_island", lat, lng)
+            ) / 5
 
         # --- 4. CLIMATIC (3 Factors) ---
         c = raw.get("climatic", {})
+        intensity_score = cls._normalize(c.get("intensity"), 50.0, "intensity", lat, lng)
+        rainfall_score = cls._normalize(c.get("rainfall"), 50.0, "rainfall", lat, lng)
+        thermal_score = cls._normalize(c.get("thermal"), 50.0, "thermal", lat, lng)
+        
         cat_climatic = (
-            cls._normalize(c.get("rainfall"), 50.0, "rainfall", lat, lng) +
-            cls._normalize(c.get("thermal"), 50.0, "thermal", lat, lng) +
-            cls._normalize(c.get("intensity"), 50.0, "intensity", lat, lng)
+            rainfall_score +
+            thermal_score +
+            intensity_score
         ) / 3
 
         # --- 5. SOCIO-ECONOMIC (3 Factors) ---
@@ -174,10 +243,7 @@ class Aggregator:
             cls._normalize(r.get("habitability"), 50.0, "habitability", lat, lng)
         ) / 4
 
-        # --- Water body detection (before aggregation) ---
-        water_details = h.get("water", {}) if isinstance(h.get("water"), dict) else {}
-        water_dist = water_details.get("distance_km")
-        is_on_water = water_val <= 5 or (water_dist is not None and float(water_dist) < 0.02)
+        # --- Water body detection (comprehensive - already done above) ---
         water_body_name = None
         if is_on_water and isinstance(water_details.get("details"), dict):
             water_body_name = water_details.get("details", {}).get("name") or "identified water body"
@@ -209,10 +275,89 @@ class Aggregator:
         water_body_snippet = None
         protected_snippet = None
 
-        # Water Body — low score (not zero) so other factors still visible; label/snippet remain clear
+        # Water Body — use actual average score, ensure non-terrestrial factors are zero
         if is_on_water:
-            final_score = min(final_score, 12.0)
-            penalty_note = "Non-Terrestrial (Open Water)"
+            # For water bodies, factors that don't make sense should be zero
+            # Update the factor scores to reflect reality
+            updated_factors = {
+                "physical": {
+                    "elevation": 0,  # Underwater elevation
+                    "ruggedness": 0,  # Underwater terrain
+                    "slope": 0,      # Underwater slope
+                    "stability": 0   # Not applicable for water
+                },
+                "environmental": {
+                    "vegetation": 0,     # No vegetation on water
+                    "pollution": 25,     # Water pollution (marine debris, oil spills)
+                    "soil": 0,           # No soil on water
+                    "biodiversity": 30, # Marine life
+                    "heat_island": 40   # Water temperature
+                },
+                "hydrology": {
+                    "flood": 0,         # Can't flood water
+                    "water": 100,       # Perfect water access
+                    "drainage": 0,      # Not applicable
+                    "groundwater": 100  # Unlimited groundwater
+                },
+                "climatic": {
+                    "intensity": 50,    # Weather intensity
+                    "rainfall": 50,     # Rainfall
+                    "thermal": 50       # Temperature
+                },
+                "socio_econ": {
+                    "infrastructure": 0,  # No infrastructure on water
+                    "landuse": 0,         # No land use
+                    "population": 0       # No population
+                },
+                "risk_resilience": {
+                    "multi_hazard": 80,   # Weather hazards
+                    "climate_change": 60, # Climate impact
+                    "recovery": 0,        # No recovery capacity
+                    "habitability": 0     # Not habitable
+                }
+            }
+            
+            # Recalculate category averages with updated factors
+            cat_physical = (updated_factors["physical"]["elevation"] + 
+                           updated_factors["physical"]["ruggedness"] + 
+                           updated_factors["physical"]["slope"] + 
+                           updated_factors["physical"]["stability"]) / 4
+            
+            cat_environmental = (updated_factors["environmental"]["vegetation"] + 
+                                 updated_factors["environmental"]["pollution"] + 
+                                 updated_factors["environmental"]["soil"] + 
+                                 updated_factors["environmental"]["biodiversity"] + 
+                                 updated_factors["environmental"]["heat_island"]) / 5
+            
+            cat_hydrology = (updated_factors["hydrology"]["flood"] + 
+                           updated_factors["hydrology"]["water"] + 
+                           updated_factors["hydrology"]["drainage"] + 
+                           updated_factors["hydrology"]["groundwater"]) / 4
+            
+            cat_climatic = (updated_factors["climatic"]["intensity"] + 
+                           updated_factors["climatic"]["rainfall"] + 
+                           updated_factors["climatic"]["thermal"]) / 3
+            
+            cat_socio = (updated_factors["socio_econ"]["infrastructure"] + 
+                        updated_factors["socio_econ"]["landuse"] + 
+                        updated_factors["socio_econ"]["population"]) / 3
+            
+            cat_risk_resilience = (updated_factors["risk_resilience"]["multi_hazard"] + 
+                                 updated_factors["risk_resilience"]["climate_change"] + 
+                                 updated_factors["risk_resilience"]["recovery"] + 
+                                 updated_factors["risk_resilience"]["habitability"]) / 4
+            
+            # Calculate final score based on actual averages (not hardcoded)
+            final_score = (
+                (cat_physical * weights["phys"]) +
+                (cat_environmental * weights["env"]) +
+                (cat_hydrology * weights["hydro"]) +
+                (cat_climatic * weights["clim"]) +
+                (cat_socio * weights["socio"]) +
+                (cat_risk_resilience * weights["risk"])
+            )
+            
+            penalty_note = "Non-Terrestrial (Open Water) - Factor-Averaged Score"
             is_hard_unsuitable = True
             label = "Not Suitable (Water Body)"
             water_body_snippet = water_body_name or "Open water"
@@ -222,13 +367,90 @@ class Aggregator:
             final_score *= 0.5
             penalty_note = "High Flood Inundation Hazard"
 
-        # Forest/Protected Area — immediate detail and low score
-        if landuse_val <= 20:
-            final_score = min(final_score, 20.0)
-            penalty_note = "Protected Environmental Zone"
-            if not is_on_water:
-                label = "Not Suitable (Protected/Forest Area)"
-                protected_snippet = landuse_class if landuse_class and landuse_class != "Unknown" else "Protected zone"
+        # Forest/Protected Area — use actual average score with realistic factor adjustments
+        if landuse_val <= 20 and not is_on_water:
+            # For protected areas, adjust factors to reflect conservation restrictions
+            protected_factors = {
+                "physical": {
+                    "elevation": slope_score,     # Keep original elevation
+                    "ruggedness": ruggedness_score, # Keep original ruggedness
+                    "slope": slope_score,        # Keep original slope
+                    "stability": stability_score  # Keep original stability
+                },
+                "environmental": {
+                    "vegetation": 95,     # High vegetation in protected areas
+                    "pollution": 15,     # Very low pollution in protected areas
+                    "soil": 10,          # Protected soil (not for development)
+                    "biodiversity": 90,  # High biodiversity
+                    "heat_island": 25    # Low heat island effect
+                },
+                "hydrology": {
+                    "flood": flood_val,        # Keep original flood
+                    "water": water_val,        # Keep original water
+                    "drainage": drainage_val,  # Keep original drainage
+                    "groundwater": groundwater_val  # Keep original groundwater
+                },
+                "climatic": {
+                    "intensity": intensity_score,  # Keep original intensity
+                    "rainfall": rainfall_score,    # Keep original rainfall
+                    "thermal": thermal_score       # Keep original thermal
+                },
+                "socio_econ": {
+                    "infrastructure": 5,   # Very limited infrastructure
+                    "landuse": 5,         # Protected land use
+                    "population": 5       # Very low population
+                },
+                "risk_resilience": {
+                    "multi_hazard": 40,   # Natural hazard risk
+                    "climate_change": 70, # Climate vulnerability
+                    "recovery": 10,       # Very low recovery capacity
+                    "habitability": 5     # Very low habitability
+                }
+            }
+            
+            # Recalculate category averages with protected area factors
+            cat_physical = (protected_factors["physical"]["elevation"] + 
+                           protected_factors["physical"]["ruggedness"] + 
+                           protected_factors["physical"]["slope"] + 
+                           protected_factors["physical"]["stability"]) / 4
+            
+            cat_environmental = (protected_factors["environmental"]["vegetation"] + 
+                                 protected_factors["environmental"]["pollution"] + 
+                                 protected_factors["environmental"]["soil"] + 
+                                 protected_factors["environmental"]["biodiversity"] + 
+                                 protected_factors["environmental"]["heat_island"]) / 5
+            
+            cat_hydrology = (protected_factors["hydrology"]["flood"] + 
+                           protected_factors["hydrology"]["water"] + 
+                           protected_factors["hydrology"]["drainage"] + 
+                           protected_factors["hydrology"]["groundwater"]) / 4
+            
+            cat_climatic = (protected_factors["climatic"]["intensity"] + 
+                           protected_factors["climatic"]["rainfall"] + 
+                           protected_factors["climatic"]["thermal"]) / 3
+            
+            cat_socio = (protected_factors["socio_econ"]["infrastructure"] + 
+                        protected_factors["socio_econ"]["landuse"] + 
+                        protected_factors["socio_econ"]["population"]) / 3
+            
+            cat_risk_resilience = (protected_factors["risk_resilience"]["multi_hazard"] + 
+                                 protected_factors["risk_resilience"]["climate_change"] + 
+                                 protected_factors["risk_resilience"]["recovery"] + 
+                                 protected_factors["risk_resilience"]["habitability"]) / 4
+            
+            # Calculate final score based on actual averages (not hardcoded)
+            final_score = (
+                (cat_physical * weights["phys"]) +
+                (cat_environmental * weights["env"]) +
+                (cat_hydrology * weights["hydro"]) +
+                (cat_climatic * weights["clim"]) +
+                (cat_socio * weights["socio"]) +
+                (cat_risk_resilience * weights["risk"])
+            )
+            
+            penalty_note = "Protected Environmental Zone - Factor-Averaged Score"
+            label = "Not Suitable (Protected/Forest Area)"
+            protected_snippet = landuse_class if landuse_class and landuse_class != "Unknown" else "Protected zone"
 
         flat_factors = {
             "rainfall": cls._normalize(c.get("rainfall")),

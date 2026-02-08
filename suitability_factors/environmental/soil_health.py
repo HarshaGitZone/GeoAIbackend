@@ -81,12 +81,24 @@ def estimate_soil_quality_score(soil_ctx: Dict) -> Optional[float]:
     Expected soil_ctx:
     {
         "slope": <percent slope>,
-        "rain_mm_60d": <rainfall in last 60 days>
+        "rain_mm_60d": <rainfall in last 60 days>,
+        "is_water_body": <boolean>,
+        "is_rainforest": <boolean>
     }
     """
 
     slope = soil_ctx.get("slope")
     rain_mm_60d = soil_ctx.get("rain_mm_60d")
+    is_water_body = soil_ctx.get("is_water_body", False)
+    is_rainforest = soil_ctx.get("is_rainforest", False)
+    
+    # FIRST: Handle water bodies - NO soil for development
+    if is_water_body:
+        return 0.0  # Zero soil quality for water bodies
+    
+    # SECOND: Handle rainforests - POOR soil for development
+    if is_rainforest:
+        return 15.0  # Very poor soil quality in rainforests (nutrient-poor, acidic)
 
     # --------------------------------------------------
     # 1. COMPUTE DRAINAGE & SATURATION
