@@ -51,7 +51,7 @@ def get_heat_island_potential(lat: float, lng: float) -> Dict[str, Any]:
         }
         
     except Exception as e:
-        logger.error(f"Error calculating heat island potential for {lat}, {lng}: {e}")
+        logger.error(f"Heat Island API Error: {e}")
         return _get_fallback_heat_island(lat, lng)
 
 def _get_surface_albedo(lat: float, lng: float) -> float:
@@ -157,7 +157,7 @@ def _get_water_body_proximity(lat: float, lng: float) -> Dict[str, Any]:
         out geom;
         """
         
-        response = requests.post(overpass_url, data=query, timeout=15)
+        response = requests.post(overpass_url, data=query, timeout=30)
         if response.status_code == 200:
             data = response.json()
             water_features = data.get('elements', [])
